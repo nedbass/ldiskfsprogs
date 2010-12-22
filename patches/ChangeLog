@@ -1,0 +1,438 @@
+2010-09-29	Oracle, Inc.
+	* version 1.41.12.2.ora1
+
+Severity   : normal
+Bugzilla   : 21704
+Description: add lfsck support for LOV_MAGIC_V3 (pools) EAs
+
+Severity   : normal
+Bugzilla   : 22162
+Description: Support journals larger than 2GB
+Details    : libext2fs wasn't handling the high bits of the journal inode size
+
+Severity   : normal
+Bugzilla   : 23502
+Description: Fix slowdown when creating large extent-mapped journals (> 1GB)
+Details    : When ext2fs_block_iterate2() is called on an extent-mapped file
+	     with a depth > 1, it will erroneously calling the callback
+	     function starting all over again with logical block 0.  It
+	     shouldn't do this, and it cases mke2fs to become very slow when
+	     creating files with very large extent-mapped journals.
+
+Severity   : enhancement
+Bugzilla   : 21683
+Description: Add --lazy-journal-init option to speed up mke2fs.
+Details    : This allows creating large journal files quickly during testing,
+	     but is not strictly safe for production, since it is possible
+	     in theory to have the journal accidentally replay the wrong data,
+	     IFF the journal is not overwritten before the first crash.
+
+Severity   : enhancement
+Bugzilla   : 4424
+Description: Add large ea support to e2fsprogs
+
+Severity   : enhancement
+Bugzilla   : 23041
+Description: Don't start MMP for debugfs if the filesystem is opened in
+	     catastrophic mode (read only, minimum metadata loaded).
+
+Severity   : enhancement
+Bugzilla   : 22421
+Description: Add check for ensuring that file system is writable before
+	     starting MMP.
+
+---------------------------------------------------------------------------
+
+2010-02-24	Sun Microsystems, Inc.
+	 * version 1.41.10-sun2
+
+Severity   : major
+Frequency  : never
+Bugzilla   : 18779
+Description: Fix a corruption problem in upstream e2fsprogs-1.41.10 when
+	     "e2fsck -D" is run on a non-indexed directory with a directory
+	     entry that sorts before "." or "..".  This was never in any
+	     Sun-released e2fsck package, but is recorded here to clarify
+	     that this bug was fixed in this release.
+
+Severity   : normal
+Frequency  : only with a corrupt MMP block
+Bugzilla   : 21543
+Description: Add check for e2fsck to correct a corrupted MMP block before the
+	     filesystem is opened.  Fix segfault at close if MMP wasn't started.
+
+Severity   : enhancement
+Bugzilla   : 21564
+Description: Print message if MMP timeout is very large.
+
+Severity   : normal
+Frequency  : SLES11 only
+Bugzilla   : 20830
+Description: Allow ext2fs_attr_set() to include attribute prefix in the name,
+	     instead of using ext2_attr_index_prefix[] outside of libext2fs.
+
+Severity   : enhancement
+Bugzilla   : 14548
+Description: Improve ZFS device probing in libblkid.
+
+---------------------------------------------------------------------------
+
+2009-06-13	Sun Microsystems, Inc.
+	 * version 1.41.6-sun1
+
+Severity   : major
+Frequency  : always
+Bugzilla   : 18779
+Description: Fix a critical regression in e2fsck introduced version 1.41.5
+	     which can undo updates to the block group descriptors after a
+	     journal replay.
+
+Severity   : enhancement
+Bugzilla   : 19536
+Description: add regression tests for MMP feature
+
+Severity   : major
+Frequency  : always
+Bugzilla   : 19536
+Description: Free block statistics correctly when MMP is turned off
+
+---------------------------------------------------------------------------
+
+2009-05-12      Sun Microsystems, Inc.
+	* version 1.41.5-sun2
+
+Severity   : major
+Frequency  : always
+Bugzilla   : 18735
+Description: e2fsck reading cached MMP block misses MMP block update
+
+---------------------------------------------------------------------------
+
+2009-04-30      Sun Microsystems, Inc.
+	* version 1.41.5-sun1
+
+Severity   : enhancement
+Description: update to latest upstream e2fsprogs release
+Details    : Update to upstream e2fsprogs release 1.41.5.  This moves a
+	     number of lustre patches into mainstream e2fsprogs, like extents,
+	     uninitialized groups, and many smaller fixes. See RELEASE-NOTES.
+
+Severity   : enhancement
+Bugzilla   : 13419
+Description: lsattr print 'H' flag for huge files; document it and extent flag
+
+Severity   : normal
+Frequency  : if MMP was enabled with e2fsck, and e2fsck exited uncleanly
+Bugzilla   : 18735
+Description: clear MMP e2fsck marker if e2fsck is interrupted
+Details    : clear MMP e2fsck marker from the SIGINT and SIGTERM signal
+	     handlers, or if e2fsck hits a fatal error.
+
+Severity   : enhancement
+Bugzilla   : 18735
+Description: add "clear-mmp" option to tune2fs to reset the MMP e2fsck marker
+Details    : add an option to run "tune2fs -f -E clear-mmp" to reset the MMP
+	     block, which is easier than disabling and re-enabling it.
+
+Severity   : enhancement
+Bugzilla   : 10555
+Description: Add FIEMAP(FIle Extent MAP) ioctl support to filefrag
+Details    : FIEMAP ioctl allows applications to efficiently fetch the extent
+	     information of a file. It can be used to map logical blocks in a
+	     in a file to physical blocks in the block device. filefrag has
+	     been modified to use the FIEMAP ioctl.
+
+Severity   : normal
+Frequency  : if MMP was enabled with tune2fs
+Bugzilla   : 17531
+Description: Free block count should be updated when MMP enabled using tune2fs
+
+---------------------------------------------------------------------------
+
+2008-07-11      Sun Microsystems, Inc.
+	* version 1.40.11-sun1
+
+Severity   : major
+Frequency  : rare, if on-disk data is corrupted
+Bugzilla   : 15320
+Description: kernel assertion with invalid eh_depth that e2fsck does not fix
+Details    : fix invalid eh_depth in the inode if the last index was invalid
+
+Severity   : enhancement
+Bugzilla   : 15604
+Description: display i_version in debugfs "stat" command
+
+---------------------------------------------------------------------------
+
+2008-05-20      Sun Microsystems, Inc.
+	* version 1.40.7-sun3
+
+Severity   : enhancement
+Bugzilla   : 9570
+Description: improve e2fsck error message for invalid HTREE depth
+
+Severity   : major
+Bugzilla   : 15872
+Description: tune2fs cannot disable uninit_groups or mmp features
+Details    : Upstream changes to the structure of tune2fs broke the
+	     ability to disable the uninit_groups and mmp features.
+	     This is particularly serious for mmp, because it will
+	     render the filesystem unmountable.
+
+---------------------------------------------------------------------------
+
+2008-05-20      Sun Microsystems, Inc.
+	* version 1.40.7-sun2
+
+Severity   : normal
+Bugzilla   : 15725
+Description: fsck (e2fsck) -m hangs headless node
+Details    : -m support for SLES10 patch was removed as this feature was 
+	     included in upstream e2fsprogs. But upstream e2fsprogs uses 
+	     "-M" whereas SLES10 assumes it to be "-m". Added this patch
+	     to provide compatibility with SLES10.
+
+Severity   : normal
+Bugzilla   : 15320
+Description: OSS crashes as e2fsck doesn't fix the header
+Details    : When the last extent index contained in an inode is deleted
+	     it resulsts in a condition, eh_entries = 0 and eh_depth !=0, 
+	     which ldiskfs doesn't expect this and crashes. Fixed it by 
+	     clearing the eh_depth.
+
+---------------------------------------------------------------------------
+
+2008-03-14      Sun Microsystems, Inc.
+	* version 1.40.7-sun1
+
+Severity   : enhancement
+Description: update to latest upstream e2fsprogs release
+Details    : Update to upstream e2fsprogs release 1.40.7.  See RELEASE-NOTES.
+
+Severity   : enhancement
+Bugzilla   : 13025
+Description: Free space fragmentation reporting tool
+Details	   : Add e2freefrag patch. Remove e2defragfree patch and changes to
+	     further patches in series
+
+Severity   : enhancement
+Description: Add basic ZFS filesystem detection to libblkid
+
+Severity   : enhancement
+Description: Enable DIR_NLINK feature in the superblock
+Details    : If there are any directories with > 65000 subdirectories, enable 
+	     the  DIR_NLINK feature in the superblock. 
+	     This is not yet included in the Lustre e2fsprogs patch series.
+
+---------------------------------------------------------------------------
+
+2008-02-01      Sun Microsystems, Inc.
+	* version 1.40.5-sun1
+
+Severity   : normal
+Bugzilla   : 13150
+Description: e2fsprogs install error on SLES10 due to different library names
+Details    : On SLES10 the e2fsprogs package splits out libcom_err and libss
+	     into a separate libcom_err RPM.  On RHEL5 the libraries are
+	     split into a separate e2fsprogs-libs RPM.  Add an "Obsoletes"
+	     and "Provides" line for each distro to provide compatibility.
+
+Severity   : normal
+Bugzilla   : 14662
+Description: e2fsprogs does not contain et_list_{un,}lock() on SLES10
+Details    : On SLES10 the e2fsprogs package has patches to add new functions
+	     to the libcom_err library for making it thread safe.  These
+	     patches were added to e2fsprogs to provide compatibility.
+
+Severity   : enhancement
+Description: update to latest upstream e2fsprogs release
+Details    : Update to upstream e2fsprogs release 1.40.5.  See RELEASE-NOTES.
+
+---------------------------------------------------------------------------
+
+2008-01-10      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.4-cfs1
+
+Severity   : enhancement
+Description: update to latest upstream e2fsprogs release
+Details    : Update to upstream e2fsprogs release 1.40.4.  See RELEASE-NOTES.
+
+Severity   : normal
+Bugzilla   : 12723
+Description: lfsck segfaults on SLES10 due to different db4 header
+Details    : lfsck was being built with a db4 header file different than the
+	     shared library installed on the system, causing it to access
+	     data structures incorrectly.  Use the right header file.
+
+---------------------------------------------------------------------------
+
+2007-12-10      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.2-cfs5
+
+Severity   : enhancement
+Bugzilla   : 13108
+Description: e2scan lists directories with -D option
+Details    : Add the ability to e2scan to list directories when the -D option
+	     is specified.  When specified with a date range, only directories
+	     modified since that time will be output.  When a full listing is
+	     requested all directories will be output.
+
+---------------------------------------------------------------------------
+
+2007-11-09      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.2-cfs4
+
+Severity   : major
+Frequency  : filesystems with corrupt inode tables
+Bugzilla   : 14085
+Description: e2fsck aborts if a non-regular file has a corrupt EA block
+Details    : e2fsck incorrectly set an error return code if it read a
+	     corrupt EA block and in the case of a file that did not have
+	     any data blocks the error was not reset, causing e2fsck to
+	     exit with an error.  The EA block read should not be returning
+	     an error in this case.
+
+---------------------------------------------------------------------------
+
+2007-10-29      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.2-cfs3
+
+Severity   : enhancement
+Bugzilla   : 10827
+Description: Add e2defragfree program to defrag free space in ext3.
+Details    : e2defrgfree program tries to increase percentage of free chunks 
+	     in free space on ext3 filesystem. It scans inodes and migrates 
+	     extents to align free chunks.
+
+---------------------------------------------------------------------------
+
+2007-10-12	Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.2-cfs2
+
+Severity   : enhancement
+Bugzilla   : 10657
+Description: Add journal checksum support to e2fsprogs.
+Details    : Changes to e2fsck to allow recovery of filesystems using journals
+	     containing checksums.
+
+Severity   : major
+Frequency  : only on Lustre OSTs systems where page size > filesystem blocksize
+Bugzilla   : 13812
+Description: e2fsck can corrupt files by changing the i_size
+Details    : On systems where page size is greater than filesystem blocksize
+	     e2fsck would round off the i_size to the page size boundary.
+	     Fix the check to allow blocks to the end of PAGE_SIZE.
+
+Severity   : enhancement
+Bugzilla   : 13108
+Description: Add e2scan program to efficiently scan filesystems for changes.
+Details    : The e2scan program scans a filesystem for files that have changed
+	     since a specific time.  This is usually more efficient than
+	     doing a filesystem-level scan as it avoids seeking as much as
+	     possible.
+
+----------------------------------------------------------------------------
+
+2007-08-16	Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.40.2-cfs1
+
+Severity   : enhancement
+Bugzilla   : 11644
+Description: Improve e2fsck heuristics for detecting corrupted inodes
+Details    : Instead of doing piecemeal checking of inodes, this tracks all
+	     errors detected in each inode, and if a certain badness threshold
+	     is exceeded, the inode should be considered garbage.
+
+Severity   : major
+Frequency  : rarely, only for failover machines
+Bugzilla   : 6334
+Description: Multiple mount protection support
+Details    : The INCOMPAT_MMP feature will protect the filesystem from being
+	     mounted more than once simultaneously, even on different nodes.
+	     It will also protect against changes by e2fsprogs to the
+	     filesystem if it is mounted. This assumes high importance in a
+	     shared storage environment where multiple mounts can severely
+	     corrupt the filesystem.
+
+Severity   : normal
+Frequency  : always on big-endian machines
+Bugzilla   : 12774
+Description: Corrections for e2fsprogs test failures on big-endian machines
+Details    : Correct upstream errors which caused some e2fsprogs regression
+	     tests to fail.  Also add support for in-inode extent swabbing.
+
+Severity   : normal
+Frequency  : unknown
+Bugzilla   : 13111
+Description: Disable resize2fs if extents are enabled
+Details    : We have received reports of resize2fs corrupting the filesystem
+	     if extents are enabled.  Although we are unable to reproduce the
+	     problem, resize2fs has been disabled for filesystems using
+	     extents as a precaution.
+
+Severity   : enhancement
+Bugzilla   : 11640
+Description: Random corruption test for e2fsprogs
+Details    : This test script randomly corrupts a filesystem and test the
+	     robustness of e2fsck in cleaning this corrupted filesystem.
+	     This test is done with random features enabled and with random
+	     amounts of corruption.
+
+----------------------------------------------------------------------------
+
+2007-06-04      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.39.cfs8
+
+Severity   : minor
+Frequency  : always
+Bugzilla   : 12362
+Description: lfsck segfault if comma-separated OSTs are used on command-line
+Details    : If the list of OSTs given to lfsck is comma-separated, instead
+	     of space-separated, lfsck will segfault when freeing memory.  
+	     This problem did not actually affect any lfsck operations.
+
+
+Severity   : enhancement
+Bugzilla   : 12608
+Description: Report IO statistics to e2fsck
+Details    : Report IO statistics for read/write performance for various
+	     stages of e2fsck if the '-t' option is given.
+
+----------------------------------------------------------------------------
+
+2007-05-03      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.39.cfs7
+
+Severity   : normal
+Frequency  : always, if using uninit_groups
+Bugzilla   : 12334
+Description: uninit_groups support was marking the last group UNINIT
+Details    : With mke2fs -O uninit_groups the last group would incorrectly
+	     be marked BLOCK_UNINIT.  The kernel part of the patch did not
+	     handle that gracefully.  Fix mke2fs and e2fsck to not do this.
+
+Severity   : enhancement
+Description: update from upstream e2fsprogs (2007-04-18)
+Details    : Includes most of the LLNL Coverity fixes.
+	     Includes equivalent fix+test for e2fsprogs-check_filetype.patch.
+	     Adds e2fsck support for external database for many directories.
+
+----------------------------------------------------------------------------
+
+2007-03-26      Cluster File Systems, Inc. <info@clusterfs.com>
+	* version 1.39.cfs6
+
+Severity   : enhancement
+Bugzilla   : 11264
+Description: Add uninit_groups (GDT_CSUM) feature support
+Details    : With an appropriate kernel, it is possible to improve e2fsck
+	     performance to be a function of used inodes instead of total
+	     inodes in the filesystem.
+
+Severity   : Normal
+Frequency  : always
+Bugzilla   : 11781
+Description: f_extents_eh_depth regression test failure
+Details    : The e2fsck regression test f_extents_eh_depth was failing because 
+	     it wasn't fixing the problem in the first pass.
+

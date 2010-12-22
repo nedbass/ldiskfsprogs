@@ -1,0 +1,381 @@
+Allow an internal journal size larger than 2^32 bytes.  The
+write_journal_inode() code is only setting the low 32-bit i_size for
+the journal size, fix it to set i_size_high also.
+
+Use s_jnl_blocks[15] to store the journal i_size_high backup.  This
+field is currently unused, as EXT2_N_BLOCKS is 15, so it is using
+s_jnl_blocks[0..14], and i_size is in s_jnl_blocks[16].
+
+Rename the "size" argument to "blocks" for the journal creation functions
+to make it clear that this parameter is in units of blocks and not bytes.
+
+Signed-off-by: Andreas Dilger <adilger@sun.com>
+
+Index: e2fsprogs-1.41.10/debugfs/logdump.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/debugfs/logdump.c
++++ e2fsprogs-1.41.10/debugfs/logdump.c
+@@ -209,6 +209,7 @@ void do_logdump(int argc, char **argv)
+ 			memset(&journal_inode, 0, sizeof(struct ext2_inode));
+ 			memcpy(&journal_inode.i_block[0], es->s_jnl_blocks,
+ 			       EXT2_N_BLOCKS*4);
++			journal_inode.i_size_high = es->s_jnl_blocks[15];
+ 			journal_inode.i_size = es->s_jnl_blocks[16];
+ 			journal_inode.i_links_count = 1;
+ 			journal_inode.i_mode = LINUX_S_IFREG | 0600;
+Index: e2fsprogs-1.41.10/e2fsck/journal.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/e2fsck/journal.c
++++ e2fsprogs-1.41.10/e2fsck/journal.c
+@@ -288,6 +288,7 @@ static errcode_t e2fsck_get_journal(e2fs
+ 			memset(&j_inode->i_ext2, 0, sizeof(struct ext2_inode));
+ 			memcpy(&j_inode->i_ext2.i_block[0], sb->s_jnl_blocks,
+ 			       EXT2_N_BLOCKS*4);
++			j_inode->i_ext2.i_size_high = sb->s_jnl_blocks[15];
+ 			j_inode->i_ext2.i_size = sb->s_jnl_blocks[16];
+ 			j_inode->i_ext2.i_links_count = 1;
+ 			j_inode->i_ext2.i_mode = LINUX_S_IFREG | 0600;
+@@ -301,7 +302,7 @@ static errcode_t e2fsck_get_journal(e2fs
+ 			retval = EXT2_ET_NO_JOURNAL;
+ 			goto try_backup_journal;
+ 		}
+-		if (j_inode->i_ext2.i_size / journal->j_blocksize <
++		if (EXT2_I_SIZE(&j_inode->i_ext2) / journal->j_blocksize <
+ 		    JFS_MIN_JOURNAL_BLOCKS) {
+ 			retval = EXT2_ET_JOURNAL_TOO_SMALL;
+ 			goto try_backup_journal;
+@@ -310,8 +311,8 @@ static errcode_t e2fsck_get_journal(e2fs
+ 		retval = ext2fs_block_iterate2(ctx->fs, j_inode->i_ino,
+ 					       BLOCK_FLAG_HOLE, 0,
+ 					       process_journal_block, &pb);
+-		if ((pb.last_block+1) * ctx->fs->blocksize <
+-		    j_inode->i_ext2.i_size) {
++		if ((pb.last_block + 1) * ctx->fs->blocksize <
++		    EXT2_I_SIZE(&j_inode->i_ext2)) {
+ 			retval = EXT2_ET_JOURNAL_TOO_SMALL;
+ 			goto try_backup_journal;
+ 		}
+@@ -322,7 +323,8 @@ static errcode_t e2fsck_get_journal(e2fs
+ 				goto errout;
+ 		}
+ 
+-		journal->j_maxlen = j_inode->i_ext2.i_size / journal->j_blocksize;
++		journal->j_maxlen = EXT2_I_SIZE(&j_inode->i_ext2) /
++			journal->j_blocksize;
+ 
+ #ifdef USE_INODE_IO
+ 		retval = ext2fs_inode_io_intern2(ctx->fs, sb->s_journal_inum,
+@@ -942,6 +944,7 @@ void e2fsck_move_ext3_journal(e2fsck_t c
+ 		if (fix_problem(ctx, PR_0_BACKUP_JNL, &pctx)) {
+ 			memcpy(sb->s_jnl_blocks, inode.i_block,
+ 			       EXT2_N_BLOCKS*4);
++			sb->s_jnl_blocks[15] = inode.i_size_high;
+ 			sb->s_jnl_blocks[16] = inode.i_size;
+ 			sb->s_jnl_backup_type = EXT3_JNL_BACKUP_BLOCKS;
+ 			ext2fs_mark_super_dirty(fs);
+Index: e2fsprogs-1.41.10/e2fsck/unix.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/e2fsck/unix.c
++++ e2fsprogs-1.41.10/e2fsck/unix.c
+@@ -1316,7 +1316,8 @@ print_unsupp_features:
+ 	 * find the default journal size.
+ 	 */
+ 	if (sb->s_jnl_backup_type == EXT3_JNL_BACKUP_BLOCKS)
+-		journal_size = sb->s_jnl_blocks[16] >> 20;
++		journal_size = (sb->s_jnl_blocks[15] << (32 - 20)) |
++			       (sb->s_jnl_blocks[16] >> 20);
+ 	else
+ 		journal_size = -1;
+ 
+Index: e2fsprogs-1.41.10/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs-1.41.10.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs-1.41.10/lib/ext2fs/ext2fs.h
+@@ -1063,11 +1063,11 @@ extern errcode_t ext2fs_mkdir(ext2_filsy
+ extern errcode_t ext2fs_zero_blocks(ext2_filsys fs, blk_t blk, int num,
+ 				    blk_t *ret_blk, int *ret_count);
+ extern errcode_t ext2fs_create_journal_superblock(ext2_filsys fs,
+-						  __u32 size, int flags,
++						  __u32 blocks, int flags,
+ 						  char  **ret_jsb);
+ extern errcode_t ext2fs_add_journal_device(ext2_filsys fs,
+ 					   ext2_filsys journal_dev);
+-extern errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t size,
++extern errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t blocks,
+ 					  int flags);
+ extern int ext2fs_default_journal_size(__u64 blocks);
+ 
+Index: e2fsprogs-1.41.10/lib/ext2fs/mkjournal.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/lib/ext2fs/mkjournal.c
++++ e2fsprogs-1.41.10/lib/ext2fs/mkjournal.c
+@@ -42,13 +42,13 @@
+  * returns it as an allocated block.
+  */
+ errcode_t ext2fs_create_journal_superblock(ext2_filsys fs,
+-					   __u32 size, int flags,
++					   __u32 blocks, int flags,
+ 					   char  **ret_jsb)
+ {
+ 	errcode_t		retval;
+ 	journal_superblock_t	*jsb;
+ 
+-	if (size < 1024)
++	if (blocks < 1024)
+ 		return EXT2_ET_JOURNAL_TOO_SMALL;
+ 
+ 	if ((retval = ext2fs_get_mem(fs->blocksize, &jsb)))
+@@ -62,7 +62,7 @@ errcode_t ext2fs_create_journal_superblo
+ 	else
+ 		jsb->s_header.h_blocktype = htonl(JFS_SUPERBLOCK_V2);
+ 	jsb->s_blocksize = htonl(fs->blocksize);
+-	jsb->s_maxlen = htonl(size);
++	jsb->s_maxlen = htonl(blocks);
+ 	jsb->s_nr_users = htonl(1);
+ 	jsb->s_first = htonl(1);
+ 	jsb->s_sequence = htonl(1);
+@@ -90,14 +90,14 @@ errcode_t ext2fs_create_journal_superblo
+  * filesystems.
+  */
+ static errcode_t write_journal_file(ext2_filsys fs, char *filename,
+-				    blk_t size, int flags)
++				    blk_t blocks, int flags)
+ {
+ 	errcode_t	retval;
+ 	char		*buf = 0;
+ 	int		fd, ret_size;
+ 	blk_t		i;
+ 
+-	if ((retval = ext2fs_create_journal_superblock(fs, size, flags, &buf)))
++	if ((retval = ext2fs_create_journal_superblock(fs, blocks, flags,&buf)))
+ 		return retval;
+ 
+ 	/* Open the device or journal file */
+@@ -117,7 +117,7 @@ static errcode_t write_journal_file(ext2
+ 		goto errout;
+ 	memset(buf, 0, fs->blocksize);
+ 
+-	for (i = 1; i < size; i++) {
++	for (i = 1; i < blocks; i++) {
+ 		ret_size = write(fd, buf, fs->blocksize);
+ 		if (ret_size < 0) {
+ 			retval = errno;
+@@ -272,15 +272,16 @@ static int mkjournal_proc(ext2_filsys	fs
+  * This function creates a journal using direct I/O routines.
+  */
+ static errcode_t write_journal_inode(ext2_filsys fs, ext2_ino_t journal_ino,
+-				     blk_t size, int flags)
++				     blk_t blocks, int flags)
+ {
+ 	char			*buf;
+ 	dgrp_t			group, start, end, i, log_flex;
+ 	errcode_t		retval;
+ 	struct ext2_inode	inode;
++	unsigned long long	inode_size;
+ 	struct mkjournal_struct	es;
+ 
+-	if ((retval = ext2fs_create_journal_superblock(fs, size, flags, &buf)))
++	if ((retval = ext2fs_create_journal_superblock(fs, blocks, flags,&buf)))
+ 		return retval;
+ 
+ 	if ((retval = ext2fs_read_bitmaps(fs)))
+@@ -292,7 +293,7 @@ static errcode_t write_journal_inode(ext
+ 	if (inode.i_blocks > 0)
+ 		return EEXIST;
+ 
+-	es.num_blocks = size;
++	es.num_blocks = blocks;
+ 	es.newblocks = 0;
+ 	es.buf = buf;
+ 	es.err = 0;
+@@ -348,7 +349,12 @@ static errcode_t write_journal_inode(ext
+ 	if ((retval = ext2fs_read_inode(fs, journal_ino, &inode)))
+ 		goto errout;
+ 
+- 	inode.i_size += fs->blocksize * size;
++	inode_size = (unsigned long long)fs->blocksize * blocks;
++	inode.i_size = inode_size & 0xFFFFFFFF;
++	inode.i_size_high = (inode_size >> 32) & 0xFFFFFFFF;
++	if (inode.i_size_high)
++		fs->super->s_feature_ro_compat |=
++			EXT2_FEATURE_RO_COMPAT_LARGE_FILE;
+ 	ext2fs_iblk_add_blocks(fs, &inode, es.newblocks);
+ 	inode.i_mtime = inode.i_ctime = fs->now ? fs->now : time(0);
+ 	inode.i_links_count = 1;
+@@ -359,6 +365,7 @@ static errcode_t write_journal_inode(ext
+ 	retval = 0;
+ 
+ 	memcpy(fs->super->s_jnl_blocks, inode.i_block, EXT2_N_BLOCKS*4);
++	fs->super->s_jnl_blocks[15] = inode.i_size_high;
+ 	fs->super->s_jnl_blocks[16] = inode.i_size;
+ 	fs->super->s_jnl_backup_type = EXT3_JNL_BACKUP_BLOCKS;
+ 	ext2fs_mark_super_dirty(fs);
+@@ -453,7 +460,7 @@ errcode_t ext2fs_add_journal_device(ext2
+  * POSIX routines if the filesystem is mounted, or using direct I/O
+  * functions if it is not.
+  */
+-errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t size, int flags)
++errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t blocks, int flags)
+ {
+ 	errcode_t		retval;
+ 	ext2_ino_t		journal_ino;
+@@ -490,7 +497,7 @@ errcode_t ext2fs_add_journal_inode(ext2_
+ 		if ((fd = open(jfile, O_CREAT|O_WRONLY, 0600)) < 0)
+ 			return errno;
+ 
+-		if ((retval = write_journal_file(fs, jfile, size, flags)))
++		if ((retval = write_journal_file(fs, jfile, blocks, flags)))
+ 			goto errout;
+ 
+ 		/* Get inode number of the journal file */
+@@ -530,7 +537,7 @@ errcode_t ext2fs_add_journal_inode(ext2_
+ 		}
+ 		journal_ino = EXT2_JOURNAL_INO;
+ 		if ((retval = write_journal_inode(fs, journal_ino,
+-						  size, flags)))
++						  blocks, flags)))
+ 			return retval;
+ 	}
+ 
+Index: e2fsprogs-1.41.10/lib/ext2fs/swapfs.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/lib/ext2fs/swapfs.c
++++ e2fsprogs-1.41.10/lib/ext2fs/swapfs.c
+@@ -75,16 +75,16 @@ void ext2fs_swap_super(struct ext2_super
+ 		sb->s_hash_seed[i] = ext2fs_swab32(sb->s_hash_seed[i]);
+ 
+ 	/* if journal backup is for a valid extent-based journal... */
+-	if (!ext2fs_extent_header_verify(sb->s_jnl_blocks,
+-					 sizeof(sb->s_jnl_blocks))) {
+-		/* ... swap only the journal i_size */
+-		sb->s_jnl_blocks[16] = ext2fs_swab32(sb->s_jnl_blocks[16]);
+-		/* and the extent data is not swapped on read */
+-		return;
++	if (ext2fs_extent_header_verify(sb->s_jnl_blocks,
++					sizeof(sb->s_jnl_blocks)) == 0) {
++		/* ... swap only the journal i_size and i_size_high,
++		 * and the extent data is not swapped on read */
++		i = 15;
++	} else {
++		/* direct/indirect journal: swap it all */
++		i = 0;
+ 	}
+-
+-	/* direct/indirect journal: swap it all */
+-	for (i=0; i < 17; i++)
++	for (; i < 17; i++)
+ 		sb->s_jnl_blocks[i] = ext2fs_swab32(sb->s_jnl_blocks[i]);
+ }
+ 
+Index: e2fsprogs-1.41.10/resize/resize2fs.c
+===================================================================
+--- e2fsprogs-1.41.10.orig/resize/resize2fs.c
++++ e2fsprogs-1.41.10/resize/resize2fs.c
+@@ -1894,6 +1894,7 @@ static errcode_t fix_sb_journal_backup(e
+ 	if (retval)
+ 		return retval;
+ 	memcpy(fs->super->s_jnl_blocks, inode.i_block, EXT2_N_BLOCKS*4);
++	fs->super->s_jnl_blocks[15] = inode.i_size_high;
+ 	fs->super->s_jnl_blocks[16] = inode.i_size;
+ 	fs->super->s_jnl_backup_type = EXT3_JNL_BACKUP_BLOCKS;
+ 	ext2fs_mark_super_dirty(fs);
+Index: e2fsprogs-1.41.10/tests/m_extent_journal/expect.1
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.41.10/tests/m_extent_journal/expect.1
+@@ -0,0 +1,83 @@
++Filesystem label=
++OS type: Linux
++Block size=2048 (log=1)
++Fragment size=2048 (log=1)
++Stride=0 blocks, Stripe width=0 blocks
++16384 inodes, 32768 blocks
++1638 blocks (5.00%) reserved for the super user
++First data block=0
++Maximum filesystem blocks=33554432
++2 block groups
++16384 blocks per group, 16384 fragments per group
++8192 inodes per group
++Superblock backups stored on blocks: 
++	16384
++
++Writing inode tables: done                            
++Creating journal (4096 blocks): done
++Writing superblocks and filesystem accounting information: done
++
++Filesystem features: has_journal ext_attr resize_inode dir_index filetype extent sparse_super
++ 
++Pass 1: Checking inodes, blocks, and sizes
++Pass 2: Checking directory structure
++Pass 3: Checking directory connectivity
++Pass 4: Checking reference counts
++Pass 5: Checking group summary information
++test_filesys: 11/16384 files (0.0% non-contiguous), 5200/32768 blocks
++Exit status is 0
++
++Filesystem volume name:   <none>
++Last mounted on:          <not available>
++Filesystem magic number:  0xEF53
++Filesystem revision #:    1 (dynamic)
++Filesystem features:      has_journal ext_attr resize_inode dir_index filetype extent sparse_super
++Default mount options:    (none)
++Filesystem state:         clean
++Errors behavior:          Continue
++Filesystem OS type:       Linux
++Inode count:              16384
++Block count:              32768
++Reserved block count:     1638
++Free blocks:              27568
++Free inodes:              16373
++First block:              0
++Block size:               2048
++Fragment size:            2048
++Reserved GDT blocks:      31
++Blocks per group:         16384
++Fragments per group:      16384
++Inodes per group:         8192
++Inode blocks per group:   512
++Mount count:              0
++Check interval:           15552000 (6 months)
++Reserved blocks uid:      0
++Reserved blocks gid:      0
++First inode:              11
++Inode size:	          128
++Journal inode:            8
++Default directory hash:   half_md4
++Journal backup:           inode blocks
++Journal features:         (none)
++Journal size:             8M
++Journal length:           4096
++Journal sequence:         0x00000001
++Journal start:            0
++
++
++Group 0: (Blocks 0-16383)
++  Primary superblock at 0, Group descriptors at 1-1
++  Reserved GDT blocks at 2-32
++  Block bitmap at 33 (+33), Inode bitmap at 34 (+34)
++  Inode table at 35-546 (+35)
++  15827 free blocks, 8181 free inodes, 2 directories
++  Free blocks: 557-16383
++  Free inodes: 12-8192
++Group 1: (Blocks 16384-32767)
++  Backup superblock at 16384, Group descriptors at 16385-16385
++  Reserved GDT blocks at 16386-16416
++  Block bitmap at 16417 (+33), Inode bitmap at 16418 (+34)
++  Inode table at 16419-16930 (+35)
++  11741 free blocks, 8192 free inodes, 0 directories
++  Free blocks: 21027-32767
++  Free inodes: 8193-16384
+Index: e2fsprogs-1.41.10/tests/m_extent_journal/script
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.41.10/tests/m_extent_journal/script
+@@ -0,0 +1,7 @@
++DESCRIPTION="extent-mapped journal"
++FS_SIZE=65536
++MKE2FS_DEVICE_SECTSIZE=2048
++export MKE2FS_DEVICE_SECTSIZE
++MKE2FS_OPTS="-O extents -j"
++. $cmd_dir/run_mke2fs
++unset MKE2FS_DEVICE_SECTSIZE

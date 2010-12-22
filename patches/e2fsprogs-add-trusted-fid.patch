@@ -1,0 +1,95 @@
+Index: e2fsprogs-1.41.12/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/debugfs/debugfs.c
++++ e2fsprogs-1.41.12/debugfs/debugfs.c
+@@ -35,6 +35,10 @@ extern char *optarg;
+ 
+ #include <ext2fs/ext2_ext_attr.h>
+ 
++#ifdef ENABLE_LFSCK
++#include <lustre/lustre_user.h>
++#endif
++
+ #include "../version.h"
+ #include "jfs_user.h"
+ 
+@@ -492,9 +496,40 @@ static void dump_xattr_string(FILE *out,
+ 			fprintf(out, "%02x ", (unsigned char)str[i]);
+ }
+ 
++#ifdef ENABLE_LFSCK
++#ifndef LPX64
++#define LPX64 "%#lx"
++#endif
++#ifndef DFID
++#define DFID "["LPX64":0x%x:0x%x]
++#endif
++static void print_fidstr(FILE *out, ext2_ino_t inode_num, void *data, int len)
++{
++	struct filter_fid *ff = data;
++
++	if (len < sizeof(*ff)) {
++		fprintf(stderr, "%s: error: fid for inode %u smaller than "
++			"expected (%d bytes), recompile?\n",
++			debug_prog_name, inode_num, len);
++		return;
++	}
++	if (len > sizeof(*ff)) {
++		fprintf(stderr, "%s: warning: fid for inode %u larger than "
++			"expected (%d bytes), recompile?\n",
++			debug_prog_name, inode_num, len);
++	}
++	fprintf(out, "  fid: objid=%llu seq=%llu parent="DFID" stripe=%u ",
++		ext2fs_le64_to_cpu(ff->ff_objid),
++		ext2fs_le64_to_cpu(ff->ff_group),
++		ext2fs_le64_to_cpu(ff->ff_fid.id),
++		ext2fs_le32_to_cpu(ff->ff_fid.generation),
++		ext2fs_le32_to_cpu(ff->ff_fid.f_type));
++}
++#endif
++
+ static void internal_dump_inode_extra(FILE *out,
+ 				      const char *prefix EXT2FS_ATTR((unused)),
+-				      ext2_ino_t inode_num EXT2FS_ATTR((unused)),
++				      ext2_ino_t inode_num,
+ 				      struct ext2_inode_large *inode)
+ {
+ 	struct ext2_ext_attr_entry *entry;
+@@ -534,6 +569,16 @@ static void internal_dump_inode_extra(FI
+ 			dump_xattr_string(out, start + entry->e_value_offs,
+ 						entry->e_value_size);
+ 			fprintf(out, "\" (%u)\n", entry->e_value_size);
++#ifdef ENABLE_LFSCK
++			/* Special decoding for Lustre fid */
++			if (entry->e_name_index == EXT2_ATTR_INDEX_TRUSTED &&
++					!strncmp(EXT2_EXT_ATTR_NAME(entry),
++					"fid", entry->e_name_len)) {
++				print_fidstr(out, inode_num,
++					     start + entry->e_value_offs,
++					     entry->e_value_size);
++			}
++#endif
+ 			entry = next;
+ 		}
+ 	}
+Index: e2fsprogs-1.41.12/debugfs/Makefile.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/debugfs/Makefile.in
++++ e2fsprogs-1.41.12/debugfs/Makefile.in
+@@ -24,6 +24,7 @@ SRCS= debug_cmds.c $(srcdir)/debugfs.c $
+ 	$(srcdir)/dump.c $(srcdir)/set_fields.c ${srcdir}/logdump.c \
+ 	$(srcdir)/htree.c $(srcdir)/unused.c
+ 
++@LFSCK_CMT@LUSTRE_INC=-I @LUSTRE@/lustre/include
+ LIBS= $(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(LIBBLKID) \
+ 	$(LIBUUID)
+ DEPLIBS= $(LIBEXT2FS) $(LIBE2P) $(DEPLIBSS) $(DEPLIBCOM_ERR) \
+@@ -31,7 +32,7 @@ DEPLIBS= $(LIBEXT2FS) $(LIBE2P) $(DEPLIB
+ 
+ .c.o:
+ 	$(E) "	CC $<"
+-	$(Q) $(CC) -c $(ALL_CFLAGS) $< -o $@
++	$(Q) $(CC) -c $(ALL_CFLAGS) $(LUSTRE_INC) $< -o $@
+ 
+ all:: $(PROGS) $(MANPAGES)
+ 

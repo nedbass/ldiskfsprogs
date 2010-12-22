@@ -1,0 +1,120 @@
+Fixes a number of compile warnings hit during building e2fsprogs-1.41.12.  A
+few unused variable removals, and signed/unsigned pointers.  The only possibly
+controversial fixup is the initialization of rec_len = 0 in copy_dir_entries().
+It wasn't totally obvious to me what to initialize it to (or if it matters),
+but 0 seems reasonable, and is better than random garbage.
+
+Signed-off-by: Andreas Dilger <adilger@sun.com>
+
+Index: e2fsprogs-1.41.12/lib/blkid/probe.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/blkid/probe.c
++++ e2fsprogs-1.41.12/lib/blkid/probe.c
+@@ -1296,7 +1296,8 @@ static int probe_hfsplus(struct blkid_pr
+ 		return 0;
+ 
+ 	label_len = blkid_be16(key->unicode_len) * 2;
+-	unicode_16be_to_utf8(label, sizeof(label), key->unicode, label_len);
++	unicode_16be_to_utf8((unsigned char *)label, sizeof(label),
++			     key->unicode, label_len);
+ 	blkid_set_tag(probe->dev, "LABEL", label, 0);
+ 	return 0;
+ }
+Index: e2fsprogs-1.41.12/lib/ext2fs/csum.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/csum.c
++++ e2fsprogs-1.41.12/lib/ext2fs/csum.c
+@@ -166,7 +166,7 @@ void print_csum(const char *msg, ext2_fi
+ 	crc2 = ext2fs_crc16(crc1, &swabgroup, sizeof(swabgroup));
+ 	crc3 = ext2fs_crc16(crc2, desc,
+ 			    offsetof(struct ext2_group_desc, bg_checksum));
+-	printf("%s: UUID %016Lx%016Lx(%04x), grp %u(%04x): %04x=%04x\n",
++	printf("%s: UUID %016llx%016llx(%04x), grp %u(%04x): %04x=%04x\n",
+ 	       msg, *(long long *)&sb->s_uuid, *(long long *)&sb->s_uuid[8],
+ 	       crc1, group, crc2, crc3, ext2fs_group_desc_csum(fs, group));
+ }
+Index: e2fsprogs-1.41.12/misc/tune2fs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/tune2fs.c
++++ e2fsprogs-1.41.12/misc/tune2fs.c
+@@ -1082,7 +1082,7 @@ static int move_block(ext2_filsys fs, ex
+ {
+ 
+ 	char *buf;
+-	dgrp_t group;
++	dgrp_t group = 0;
+ 	errcode_t retval;
+ 	int meta_data = 0;
+ 	blk_t blk, new_blk, goal;
+Index: e2fsprogs-1.41.12/e2fsck/message.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/message.c
++++ e2fsprogs-1.41.12/e2fsck/message.c
+@@ -263,7 +263,6 @@ static _INLINE_ void expand_inode_expres
+ {
+ 	struct ext2_inode	*inode;
+ 	struct ext2_inode_large	*large_inode;
+-	time_t			t;
+ 
+ 	if (!ctx || !ctx->inode)
+ 		goto no_inode;
+Index: e2fsprogs-1.41.12/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass1.c
++++ e2fsprogs-1.41.12/e2fsck/pass1.c
+@@ -401,11 +401,10 @@ static void check_is_really_dir(e2fsck_t
+ 				char *buf)
+ {
+ 	struct ext2_inode *inode = pctx->inode;
+-	struct ext2_dir_entry 	*dirent;
++	struct ext2_dir_entry	*dirent;
+ 	const char		*old_op;
+ 	errcode_t		retval;
+ 	blk_t			blk;
+-	blk64_t			first_dir_blk;
+ 	unsigned int		i, rec_len, not_device = 0;
+ 	int			extent_fs;
+ 
+@@ -437,7 +436,8 @@ static void check_is_really_dir(e2fsck_t
+ 	 * with it.
+ 	 */
+ 
+-	extent_fs = (ctx->fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS);
++	extent_fs = (ctx->fs->super->s_feature_incompat &
++		     EXT3_FEATURE_INCOMPAT_EXTENTS);
+ 	if (extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) {
+ 		/* extent mapped */
+ 		if  (ext2fs_bmap(ctx->fs, pctx->ino, inode, 0, 0, 0,
+Index: e2fsprogs-1.41.12/e2fsck/rehash.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/rehash.c
++++ e2fsprogs-1.41.12/e2fsck/rehash.c
+@@ -430,12 +430,13 @@ static errcode_t copy_dir_entries(e2fsck
+ 		return retval;
+ 	dirent = (struct ext2_dir_entry *) block_start;
+ 	prev_rec_len = 0;
++	rec_len = 0;
+ 	left = fs->blocksize;
+ 	slack = fd->compress ? 12 :
+ 		(fs->blocksize * ctx->htree_slack_percentage)/100;
+ 	if (slack < 12)
+ 		slack = 12;
+-	for (i=0; i < fd->num_array; i++) {
++	for (i = 0; i < fd->num_array; i++) {
+ 		ent = fd->harray + i;
+ 		if (ent->dir->inode == 0)
+ 			continue;
+Index: e2fsprogs-1.41.12/e2fsck/Makefile.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/Makefile.in
++++ e2fsprogs-1.41.12/e2fsck/Makefile.in
+@@ -138,7 +138,8 @@ crc32table.h: gen_crc32table
+ tst_problem: $(srcdir)/problem.c $(srcdir)/problem.h $(LIBEXT2FS) \
+ 	$(DEPLIBCOM_ERR)
+ 	$(Q) $(CC) $(BUILD_LDFLAGS) $(ALL_CFLAGS) -o tst_problem \
+-		$(srcdir)/problem.c -DUNITTEST $(LIBEXT2FS) $(LIBCOM_ERR)
++		$(srcdir)/problem.c -DUNITTEST $(LIBEXT2FS) $(LIBCOM_ERR) \
++		$(LIBINTL)
+ 
+ tst_crc32: $(srcdir)/crc32.c $(LIBEXT2FS) $(DEPLIBCOM_ERR)
+ 	$(Q) $(CC) $(BUILD_LDFLAGS) $(ALL_CFLAGS) -o tst_crc32 $(srcdir)/crc32.c \

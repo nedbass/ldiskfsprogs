@@ -1,0 +1,41 @@
+b=23502 fix large journal create slowdowns (from upstream 1.41.11)
+
+
+commit 8e2399d57ac2bec1830e27deeeac66002d81001c
+Author: Theodore Ts'o <tytso@mit.edu>
+Date:   Thu Mar 11 12:47:41 2010 -0500
+
+    ext2fs: Optimize extending an extent-mapped file using ext2fs_block_iterate2()
+    
+    When ext2fs_block_iterate2() is called on an extent-mapped file with a
+    depth > 1, it will erroneously calling the callback function starting
+    all over again with an offset of logical block 0.  It shouldn't do
+    this, and it cases mke2fs to become very slow when creating files with
+    very large journals.
+    
+    Fix this.
+    
+    Signed-off-by: "Theodore Ts'o" <tytso@mit.edu>
+
+diff --git a/lib/ext2fs/block.c b/lib/ext2fs/block.c
+index 490116d..c8d6b17 100644
+--- a/lib/ext2fs/block.c
++++ b/lib/ext2fs/block.c
+@@ -379,6 +379,7 @@ errcode_t ext2fs_block_iterate2(ext2_filsys fs,
+ 				ctx.errcode = 0;
+ 				if (!(flags & BLOCK_FLAG_APPEND))
+ 					break;
++			next_block_set:
+ 				blk = 0;
+ 				r = (*ctx.func)(fs, &blk, blockcnt,
+ 						0, 0, priv_data);
+@@ -392,7 +393,8 @@ errcode_t ext2fs_block_iterate2(ext2_filsys fs,
+ 						       (blk64_t) blk, 0);
+ 					if (ctx.errcode || (ret & BLOCK_ABORT))
+ 						break;
+-					continue;
++					if (blk)
++						goto next_block_set;
+ 				}
+ 				break;
+ 			}

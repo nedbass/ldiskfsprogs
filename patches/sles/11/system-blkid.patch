@@ -1,0 +1,10 @@
+--- e2fsprogs-1.41.12/e2fsck/Makefile.in.dist	2010-09-17 08:27:32.000000000 -0400
++++ e2fsprogs-1.41.12/e2fsck/Makefile.in	2010-09-17 08:27:53.000000000 -0400
+@@ -366,7 +366,6 @@
+  $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext2_fs.h \
+  $(top_srcdir)/lib/et/com_err.h $(top_srcdir)/lib/ext2fs/ext2_io.h \
+  $(top_builddir)/lib/ext2fs/ext2_err.h $(top_srcdir)/lib/ext2fs/bitops.h \
+- $(top_srcdir)/lib/blkid/blkid.h $(top_builddir)/lib/blkid/blkid_types.h \
+  $(srcdir)/problem.h $(srcdir)/lfsck.h
+ journal.o: $(srcdir)/journal.c $(srcdir)/jfs_user.h $(srcdir)/e2fsck.h \
+  $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \

@@ -1,0 +1,177 @@
+Index: e2fsprogs-1.41.9/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs-1.41.9.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs-1.41.9/lib/ext2fs/ext2fs.h
+@@ -181,10 +181,9 @@ typedef struct ext2_file *ext2_file_t;
+ 
+ /*
+  * Flags for mkjournal
+- *
+- * EXT2_MKJOURNAL_V1_SUPER	Make a (deprecated) V1 journal superblock
+  */
+-#define EXT2_MKJOURNAL_V1_SUPER	0x0000001
++#define EXT2_MKJOURNAL_V1_SUPER	0x0000001 /* create V1 superblock (deprecated) */
++#define EXT2_MKJOURNAL_LAZYINIT	0x0000002 /* don't zero journal inode before use*/
+ 
+ struct struct_ext2_filsys {
+ 	errcode_t			magic;
+Index: e2fsprogs-1.41.9/lib/ext2fs/mkjournal.c
+===================================================================
+--- e2fsprogs-1.41.9.orig/lib/ext2fs/mkjournal.c
++++ e2fsprogs-1.41.9/lib/ext2fs/mkjournal.c
+@@ -103,7 +103,7 @@ static errcode_t write_journal_file(ext2
+ 	/* Open the device or journal file */
+ 	if ((fd = open(filename, O_WRONLY)) < 0) {
+ 		retval = errno;
+-		goto errout;
++		goto errfree;
+ 	}
+ 
+ 	/* Write the superblock out */
+@@ -116,6 +116,9 @@ static errcode_t write_journal_file(ext2
+ 	if (ret_size != (int) fs->blocksize)
+ 		goto errout;
+ 	memset(buf, 0, fs->blocksize);
++
++	if (flags & EXT2_MKJOURNAL_LAZYINIT)
++		goto success;
+ 
+ 	for (i = 1; i < size; i++) {
+ 		ret_size = write(fd, buf, fs->blocksize);
+@@ -126,10 +129,12 @@ static errcode_t write_journal_file(ext2
+ 		if (ret_size != (int) fs->blocksize)
+ 			goto errout;
+ 	}
+-	close(fd);
+ 
++success:
+ 	retval = 0;
+ errout:
++	close(fd);
++errfree:
+ 	ext2fs_free_mem(&buf);
+ 	return retval;
+ }
+@@ -201,6 +206,7 @@ struct mkjournal_struct {
+ 	blk_t		goal;
+ 	blk_t		blk_to_zero;
+ 	int		zero_count;
++	int		flags;
+ 	char		*buf;
+ 	errcode_t	err;
+ };
+@@ -232,7 +238,7 @@ static int mkjournal_proc(ext2_filsys	fs
+ 	retval = 0;
+ 	if (blockcnt <= 0)
+ 		retval = io_channel_write_blk(fs->io, new_blk, 1, es->buf);
+-	else {
++	else if (!(es->flags & EXT2_MKJOURNAL_LAZYINIT)) {
+ 		if (es->zero_count) {
+ 			if ((es->blk_to_zero + es->zero_count == new_blk) &&
+ 			    (es->zero_count < 1024))
+@@ -297,6 +302,7 @@ static errcode_t write_journal_inode(ext
+ 	es.newblocks = 0;
+ 	es.buf = buf;
+ 	es.err = 0;
++	es.flags = flags;
+ 	es.zero_count = 0;
+ 
+ 	if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS) {
+@@ -495,6 +496,13 @@ errcode_t ext2fs_add_journal_inode(ext2_
+ 		/* Create the journal file */
+ 		if ((fd = open(jfile, O_CREAT|O_WRONLY, 0600)) < 0)
+ 			return errno;
++
++		/* Note that we can't do lazy journal initialization for mounted
++		 * filesystems, since the zero writing is also allocating the
++		 * journal blocks.  We could use fallocate, but not all kernels
++		 * support that, and creating a journal on a mounted ext2
++		 * filesystems is extremely rare these days...  Skip it. */
++		flags &= ~EXT2_MKJOURNAL_LAZYINIT;
+ 
+ 		if ((retval = write_journal_file(fs, jfile, size, flags)))
+ 			goto errout;
+Index: e2fsprogs-1.41.9/misc/mke2fs.8.in
+===================================================================
+--- e2fsprogs-1.41.9.orig/misc/mke2fs.8.in
++++ e2fsprogs-1.41.9/misc/mke2fs.8.in
+@@ -232,7 +232,15 @@ This speeds up filesystem
+ initialization noticeably, but it requires the kernel to finish
+ initializing the filesystem in the background when the filesystem is
+ first mounted.  If the option value is omitted, it defaults to 1 to
+-enable lazy inode table initialization.
++enable lazy inode table zeroing.
++.TP
++.B lazy_journal_init\fR[\fB= \fI<0 to disable, 1 to enable>\fR]
++If enabled, the journal inode will not be fully zeroed out by
++.BR mke2fs .
++This speeds up filesystem initialization noticeably, but carries some
++small risk if the system crashes before the journal has been overwritten
++entirely one time.  If the option value is omitted, it defaults to 1 to
++enable lazy journal inode zeroing.
+ .TP
+ .B test_fs
+ Set a flag in the filesystem superblock indicating that it may be
+Index: e2fsprogs-1.41.9/misc/mke2fs.c
+===================================================================
+--- e2fsprogs-1.41.9.orig/misc/mke2fs.c
++++ e2fsprogs-1.41.9/misc/mke2fs.c
+@@ -551,6 +551,10 @@ static void create_journal_dev(ext2_fils
+ 			_("while initializing journal superblock"));
+ 		exit(1);
+ 	}
++
++	if (journal_flags & EXT2_MKJOURNAL_LAZYINIT)
++		goto write_superblock;
++
+ 	if (quiet)
+ 		memset(&progress, 0, sizeof(progress));
+ 	else
+@@ -578,6 +582,8 @@ static void create_journal_dev(ext2_fils
+ 	}
+ 	ext2fs_zero_blocks(0, 0, 0, 0, 0);
+ 
++	progress_close(&progress);
++write_superblock:
+ 	retval = io_channel_write_blk(fs->io,
+ 				      fs->super->s_first_data_block+1,
+ 				      1, buf);
+@@ -586,7 +592,6 @@ static void create_journal_dev(ext2_fils
+ 			_("while writing journal superblock"));
+ 		exit(1);
+ 	}
+-	progress_close(&progress);
+ }
+ 
+ static void show_stats(ext2_filsys fs)
+@@ -795,6 +800,12 @@ static void parse_extended_opts(struct e
+ 			}
+ 		} else if (!strcmp(token, "test_fs")) {
+ 			param->s_flags |= EXT2_FLAGS_TEST_FILESYS;
++		} else if (!strcmp(token, "lazy_journal_init")) {
++			if (arg)
++				journal_flags |= strtoul(arg, &p, 0) ?
++						EXT2_MKJOURNAL_LAZYINIT : 0;
++			else
++				journal_flags |= EXT2_MKJOURNAL_LAZYINIT;
+ 		} else if (!strcmp(token, "lazy_itable_init")) {
+ 			if (arg)
+ 				lazy_itable_init = strtoul(arg, &p, 0);
+@@ -815,6 +826,7 @@ static void parse_extended_opts(struct e
+ 			"\tstripe-width=<RAID stride * data disks in blocks>\n"
+ 			"\tresize=<resize maximum size in blocks>\n"
+ 			"\tlazy_itable_init=<0 to disable, 1 to enable>\n"
++			"\tlazy_journal_init=<0 to disable, 1 to enable>\n"
+ 			"\ttest_fs\n\n"),
+ 			badopt ? badopt : "");
+ 		free(buf);
+@@ -1637,6 +1649,9 @@ got_size:
+ 
+ 	lazy_itable_init = get_bool_from_profile(fs_types,
+ 						 "lazy_itable_init", 0);
++	journal_flags |= get_bool_from_profile(fs_types,
++					       "lazy_journal_init", 0) ?
++						EXT2_MKJOURNAL_LAZYINIT : 0;
+ 
+ 	/* Get options from profile */
+ 	for (cpp = fs_types; *cpp; cpp++) {

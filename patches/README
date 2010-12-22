@@ -1,0 +1,14 @@
+README for e2fsprogs/patches
+
+This directory contains patches from Sun Microsystems, Inc. that are
+ALREADY applied to this version of e2fsprogs, in the order specified
+by "series".  Some of the patches here are "historical" in the sense
+that they have already been added to the upstream e2fsprogs repository
+since this release, but they are not in any official e2fsprogs release
+so are included here for reference.
+
+Unfortunately, it isn't possible to have an SRPM that doesn't have the
+patches applied, because the patches change the "configure" script, and
+that in turn changes the .spec file (built from .spec.in) and that is
+sourced by rpmbuild before the patches are applied...
+

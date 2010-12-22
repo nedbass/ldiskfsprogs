@@ -1,0 +1,2018 @@
+Index: e2fsprogs-1.41.12/configure.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/configure.in	2010-08-27 16:28:53.000000000 -0400
++++ e2fsprogs-1.41.12/configure.in	2010-08-27 17:32:45.000000000 -0400
+@@ -574,6 +574,28 @@
+ )
+ AC_SUBST(DEBUGFS_CMT)
+ dnl
++dnl handle --enable-e2scan
++dnl
++AC_ARG_ENABLE([e2scan],
++[  --disable-e2scan   	  disable support of e2scan program],
++if test "$enableval" = "no"
++then
++	echo "Disabling e2scan support"
++	E2SCAN_CMT="#"
++	E2SCAN_MAN=.\"
++else
++	E2SCAN_CMT=
++	E2SCAN_MAN=
++	echo "Enabling e2scan support"
++fi
++,
++echo "Enabling e2scan support by default"
++E2SCAN_CMT=
++E2SCAN_MAN=
++)
++AC_SUBST(E2SCAN_CMT)
++AC_SUBST(E2SCAN_MAN)
++dnl
+ dnl handle --enable-imager
+ dnl
+ AC_ARG_ENABLE([imager],
+@@ -779,6 +801,10 @@
+ #endif
+ ]])
+ AC_CHECK_HEADERS(db.h)
++dnl do not check sqlite3.h if e2scan is disabled
++if test x"$E2SCAN_CMT" == x; then
++AC_CHECK_HEADERS(sqlite3.h)
++fi
+ AC_FUNC_VPRINTF
+ dnl Check to see if dirent has member d_reclen. On cygwin those d_reclen
+ dnl is not decleared.
+@@ -916,6 +942,51 @@
+ AC_DEFINE(HAVE_DB)])
+ AC_SUBST(DB_LIB)
+ dnl
++dnl Check to see if static sqlite exists
++dnl
++AC_ARG_WITH(
++	[sqlite3],
++	[  --with-sqlite3=DIR      location of sqlite3 library (default /usr/lib)],,
++	[with_sqlite3=/usr/lib])
++
++dnl do not check sqlite3 library if e2scan is disabled
++if test x"$E2SCAN_CMT" == x; then
++
++CFLAGS_OLD=$CFLAGS
++SQLITE3_LIB=''
++dnl
++dnl check static sqlite3 first
++dnl
++CFLAGS="$CFLAGS_OLD -L$with_sqlite3 -static -pthread"
++AC_CHECK_LIB(sqlite3, sqlite3_open,
++	[
++	SQLITE3_LIB="-L$with_sqlite3 -static -pthread -lsqlite3"
++	AC_DEFINE(HAVE_SQLITE3)
++	])
++
++if test x"$SQLITE3_LIB" == x; then
++dnl
++dnl static sqlite3 is not found, check dynamic sqlite3
++dnl
++	AC_MSG_WARN(no static sqlite3 - looking for dynamic one)
++	CFLAGS="$CFLAGS_OLD -L$with_sqlite3 -pthread"
++	AC_CHECK_LIB(sqlite3, sqlite3_close,
++		[
++		SQLITE3_LIB="-L$with_sqlite3 -pthread -lsqlite3"
++		AC_DEFINE(HAVE_SQLITE3)
++		])
++fi
++
++AC_SUBST(SQLITE3_LIB)
++CFLAGS=$CFLAGS_OLD
++
++if test x"$SQLITE3_LIB" == x; then
++	AC_MSG_WARN(no sqlite3 - e2scan will not support database based scanning)
++fi
++
++fi
++
++dnl
+ dnl See if optreset exists
+ dnl
+ AC_MSG_CHECKING(for optreset)
+@@ -1132,7 +1203,7 @@
+ 	lib/ss/ss.pc lib/uuid/uuid.pc lib/et/com_err.pc \
+ 	lib/e2p/e2p.pc lib/blkid/blkid.pc lib/ext2fs/ext2fs.pc \
+ 	misc/Makefile ext2ed/Makefile e2fsck/Makefile \
+-	debugfs/Makefile tests/Makefile tests/progs/Makefile \
++	debugfs/Makefile e2scan/Makefile tests/Makefile tests/progs/Makefile \
+ 	resize/Makefile doc/Makefile intl/Makefile \
+ 	intl/libgnuintl.h po/Makefile.in ; do
+ 	if test -d `dirname ${srcdir}/$i` ; then
+Index: e2fsprogs-1.41.12/configure
+===================================================================
+--- e2fsprogs-1.41.12.orig/configure	2010-08-27 16:51:46.000000000 -0400
++++ e2fsprogs-1.41.12/configure	2010-08-27 17:33:44.000000000 -0400
+@@ -611,6 +611,7 @@
+ LINUX_CMT
+ UNI_DIFF_OPTS
+ SEM_INIT_LIB
++SQLITE3_LIB
+ DB_LIB
+ SOCKET_LIB
+ SIZEOF_LONG_LONG
+@@ -676,6 +677,8 @@
+ FSCK_PROG
+ RESIZER_CMT
+ IMAGER_CMT
++E2SCAN_MAN
++E2SCAN_CMT
+ DEBUGFS_CMT
+ BLKID_CMT
+ DEPPROFILED_LIBBLKID
+@@ -807,6 +810,7 @@
+ enable_libuuid
+ enable_libblkid
+ enable_debugfs
++enable_e2scan
+ enable_imager
+ enable_resizer
+ enable_fsck
+@@ -819,6 +823,7 @@
+ with_libiconv_prefix
+ with_included_gettext
+ with_libintl_prefix
++with_sqlite3
+ '
+       ac_precious_vars='build_alias
+ host_alias
+@@ -1459,6 +1464,7 @@
+   --disable-libuuid	  do not build private uuid library
+   --disable-libblkid	  do not build private blkid library
+   --disable-debugfs   	  disable support of debugfs program
++  --disable-e2scan   	  disable support of e2scan program
+   --disable-imager   	  disable support of e2image program
+   --disable-resizer   	  disable support of e2resize program
+   --enable-fsck           build fsck wrapper program
+@@ -1483,6 +1489,7 @@
+   --with-included-gettext use the GNU gettext library included here
+   --with-libintl-prefix[=DIR]  search for libintl in DIR/include and DIR/lib
+   --without-libintl-prefix     don't search for libintl in includedir and libdir
++  --with-sqlite3=DIR      location of sqlite3 library (default /usr/lib)
+ 
+ Some influential environment variables:
+   CC          C compiler command
+@@ -5398,6 +5405,28 @@
+ fi
+ 
+ 
++# Check whether --enable-e2scan was given.
++if test "${enable_e2scan+set}" = set; then :
++  enableval=$enable_e2scan; if test "$enableval" = "no"
++then
++	echo "Disabling e2scan support"
++	E2SCAN_CMT="#"
++	E2SCAN_MAN=.\"
++else
++	E2SCAN_CMT=
++	E2SCAN_MAN=
++	echo "Enabling e2scan support"
++fi
++
++else
++  echo "Enabling e2scan support by default"
++E2SCAN_CMT=
++E2SCAN_MAN=
++
++fi
++
++
++
+ # Check whether --enable-imager was given.
+ if test "${enable_imager+set}" = set; then :
+   enableval=$enable_imager; if test "$enableval" = "no"
+@@ -10171,6 +10200,20 @@
+ 
+ done
+ 
++if test x"$E2SCAN_CMT" == x; then
++for ac_header in sqlite3.h
++do :
++  ac_fn_c_check_header_mongrel "$LINENO" "sqlite3.h" "ac_cv_header_sqlite3_h" "$ac_includes_default"
++if test "x$ac_cv_header_sqlite3_h" = x""yes; then :
++  cat >>confdefs.h <<_ACEOF
++#define HAVE_SQLITE3_H 1
++_ACEOF
++
++fi
++
++done
++
++fi
+ for ac_func in vprintf
+ do :
+   ac_fn_c_check_func "$LINENO" "vprintf" "ac_cv_func_vprintf"
+@@ -11022,6 +11065,125 @@
+ fi
+ 
+ 
++
++# Check whether --with-sqlite3 was given.
++if test "${with_sqlite3+set}" = set; then :
++  withval=$with_sqlite3;
++else
++  with_sqlite3=/usr/lib
++fi
++
++
++if test x"$E2SCAN_CMT" == x; then
++
++CFLAGS_OLD=$CFLAGS
++SQLITE3_LIB=''
++CFLAGS="$CFLAGS_OLD -L$with_sqlite3 -static -pthread"
++{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for sqlite3_open in -lsqlite3" >&5
++$as_echo_n "checking for sqlite3_open in -lsqlite3... " >&6; }
++if test "${ac_cv_lib_sqlite3_sqlite3_open+set}" = set; then :
++  $as_echo_n "(cached) " >&6
++else
++  ac_check_lib_save_LIBS=$LIBS
++LIBS="-lsqlite3  $LIBS"
++cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++
++/* Override any GCC internal prototype to avoid an error.
++   Use char because int might match the return type of a GCC
++   builtin and then its argument prototype would still apply.  */
++#ifdef __cplusplus
++extern "C"
++#endif
++char sqlite3_open ();
++int
++main ()
++{
++return sqlite3_open ();
++  ;
++  return 0;
++}
++_ACEOF
++if ac_fn_c_try_link "$LINENO"; then :
++  ac_cv_lib_sqlite3_sqlite3_open=yes
++else
++  ac_cv_lib_sqlite3_sqlite3_open=no
++fi
++rm -f core conftest.err conftest.$ac_objext \
++    conftest$ac_exeext conftest.$ac_ext
++LIBS=$ac_check_lib_save_LIBS
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_sqlite3_sqlite3_open" >&5
++$as_echo "$ac_cv_lib_sqlite3_sqlite3_open" >&6; }
++if test "x$ac_cv_lib_sqlite3_sqlite3_open" = x""yes; then :
++
++	SQLITE3_LIB="-L$with_sqlite3 -static -pthread -lsqlite3"
++	$as_echo "#define HAVE_SQLITE3 1" >>confdefs.h
++
++
++fi
++
++
++if test x"$SQLITE3_LIB" == x; then
++	{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: no static sqlite3 - looking for dynamic one" >&5
++$as_echo "$as_me: WARNING: no static sqlite3 - looking for dynamic one" >&2;}
++	CFLAGS="$CFLAGS_OLD -L$with_sqlite3 -pthread"
++	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for sqlite3_close in -lsqlite3" >&5
++$as_echo_n "checking for sqlite3_close in -lsqlite3... " >&6; }
++if test "${ac_cv_lib_sqlite3_sqlite3_close+set}" = set; then :
++  $as_echo_n "(cached) " >&6
++else
++  ac_check_lib_save_LIBS=$LIBS
++LIBS="-lsqlite3  $LIBS"
++cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++
++/* Override any GCC internal prototype to avoid an error.
++   Use char because int might match the return type of a GCC
++   builtin and then its argument prototype would still apply.  */
++#ifdef __cplusplus
++extern "C"
++#endif
++char sqlite3_close ();
++int
++main ()
++{
++return sqlite3_close ();
++  ;
++  return 0;
++}
++_ACEOF
++if ac_fn_c_try_link "$LINENO"; then :
++  ac_cv_lib_sqlite3_sqlite3_close=yes
++else
++  ac_cv_lib_sqlite3_sqlite3_close=no
++fi
++rm -f core conftest.err conftest.$ac_objext \
++    conftest$ac_exeext conftest.$ac_ext
++LIBS=$ac_check_lib_save_LIBS
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_sqlite3_sqlite3_close" >&5
++$as_echo "$ac_cv_lib_sqlite3_sqlite3_close" >&6; }
++if test "x$ac_cv_lib_sqlite3_sqlite3_close" = x""yes; then :
++
++		SQLITE3_LIB="-L$with_sqlite3 -pthread -lsqlite3"
++		$as_echo "#define HAVE_SQLITE3 1" >>confdefs.h
++
++
++fi
++
++fi
++
++
++CFLAGS=$CFLAGS_OLD
++
++if test x"$SQLITE3_LIB" == x; then
++	{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: no sqlite3 - e2scan will not support database based scanning" >&5
++$as_echo "$as_me: WARNING: no sqlite3 - e2scan will not support database based scanning" >&2;}
++fi
++
++fi
++
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking for optreset" >&5
+ $as_echo_n "checking for optreset... " >&6; }
+ if test "${ac_cv_have_optreset+set}" = set; then :
+@@ -11361,7 +11523,7 @@
+ 	lib/ss/ss.pc lib/uuid/uuid.pc lib/et/com_err.pc \
+ 	lib/e2p/e2p.pc lib/blkid/blkid.pc lib/ext2fs/ext2fs.pc \
+ 	misc/Makefile ext2ed/Makefile e2fsck/Makefile \
+-	debugfs/Makefile tests/Makefile tests/progs/Makefile \
++	debugfs/Makefile e2scan/Makefile tests/Makefile tests/progs/Makefile \
+ 	resize/Makefile doc/Makefile intl/Makefile \
+ 	intl/libgnuintl.h po/Makefile.in ; do
+ 	if test -d `dirname ${srcdir}/$i` ; then
+Index: e2fsprogs-1.41.12/e2fsprogs.spec.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsprogs.spec.in	2010-08-27 16:28:53.000000000 -0400
++++ e2fsprogs-1.41.12/e2fsprogs.spec.in	2010-08-27 17:32:45.000000000 -0400
+@@ -149,6 +149,7 @@
+ %{_sbindir}/mklost+found
+ %{_sbindir}/e2freefrag
+ @LFSCK_CMT@%{_sbindir}/lfsck
++@E2SCAN_CMT@%{_sbindir}/e2scan
+ 
+ %{_root_libdir}/libblkid.so.*
+ %{_root_libdir}/libcom_err.so.*
+@@ -182,6 +183,7 @@
+ %{_mandir}/man8/fsck.ext4dev.8*
+ %{_mandir}/man8/e2image.8*
+ %{_mandir}/man8/e2label.8*
++@E2SCAN_CMT@%{_mandir}/man8/e2scan.8*
+ %{_mandir}/man8/e2undo.8*
+ %{_mandir}/man8/fsck.8*
+ %{_mandir}/man8/logsave.8*
+Index: e2fsprogs-1.41.12/e2scan/db.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ e2fsprogs-1.41.12/e2scan/db.c	2010-08-27 17:32:45.000000000 -0400
+@@ -0,0 +1,265 @@
++#define _GNU_SOURCE
++#define _FILE_OFFSET_BITS 64
++
++#include <stdio.h>
++#include <time.h>
++#include <unistd.h>
++#include <ext2fs/ext2fs.h>
++#include <sys/stat.h>
++
++#if defined(HAVE_SQLITE3) && defined(HAVE_SQLITE3_H)
++
++#include <sqlite3.h>
++
++/* e2scan.c */
++extern ext2_filsys fs;
++extern struct {
++	int mode;
++	int nr;
++	union {
++		struct {
++			int fd;
++			int nr_commands;
++		} db;
++		struct {
++			/* number of files newer than specified time */
++			ext2_ino_t nr_files;
++			/* number of files reported */
++			ext2_ino_t nr_reported;
++			time_t mtimestamp;
++			time_t ctimestamp;
++		} fl;
++	};
++} scan_data;
++
++int block_iterate_cb(ext2_filsys fs, blk_t  *block_nr,
++		     e2_blkcnt_t blockcnt,
++		     blk_t ref_block EXT2FS_ATTR((unused)),
++		     int ref_offset EXT2FS_ATTR((unused)),
++		     void *priv_data);
++
++
++static long count = 10000;
++
++static void exec_one_sql_noreturn(sqlite3 *db, char *sqls)
++{
++	char *errmsg = NULL;
++
++	if (sqlite3_exec(db, sqls, NULL, NULL, &errmsg) != SQLITE_OK) {
++		fprintf(stderr, "SQL error: %s;\nrequest: %s", errmsg, sqls);
++		sqlite3_free(errmsg);
++		exit(1);
++	}
++}
++
++static void create_sql_table(sqlite3 *db, const char *table_name,
++			     const char *columns)
++{
++	char *sqls;
++
++	if (asprintf(&sqls, "create table %s (%s)", table_name, columns) < 0) {
++		perror("asprintf failed");
++		exit(1);
++	}
++
++	exec_one_sql_noreturn(db, sqls);
++	free(sqls);
++}
++
++static void begin_one_transaction(sqlite3 *db)
++{
++	exec_one_sql_noreturn(db, "BEGIN;");
++}
++
++static void commit_one_transaction(sqlite3 *db)
++{
++	exec_one_sql_noreturn(db, "COMMIT;");
++}
++
++static void batch_one_transaction(sqlite3 *db)
++{
++	static long num = 0;
++
++	num ++;
++	if (num % count == 0) {
++		commit_one_transaction(db);
++		begin_one_transaction(db);
++	}
++	/* else do nothing */
++}
++
++#define COLUMNS "ino, generation, parent, name, size, mtime, ctime, dtime"
++
++static void create_full_db(const char *name, int fd)
++{
++	sqlite3 *db;
++	int rd;
++	int nr;
++	char sqls[512];
++
++	if (sqlite3_open(name, &db) != SQLITE_OK) {
++		fprintf(stderr, "failed to sqlite3_open: %s\n", name);
++		sqlite3_close(db);
++		exit(1);
++	}
++	create_sql_table(db, "dirs", COLUMNS);
++	create_sql_table(db, "files", COLUMNS);
++
++	begin_one_transaction(db);
++
++	nr = 0;
++	while (1) {
++		rd = read(fd, sqls, 512);
++		if (rd == -1) {
++			perror("read failed\n");
++			exit(1);
++		}
++		if (rd != 512)
++			break;
++		nr ++;
++		exec_one_sql_noreturn(db, sqls);
++		batch_one_transaction(db);
++	}
++	commit_one_transaction(db);
++	printf("database is created, %d records are inserted\n", nr);
++	sqlite3_close(db);
++}
++
++/* write sql command to pipe */
++#define PIPECMDLEN 512
++static void write_sql_command(int fd, const char *sqls)
++{
++	char buf[PIPECMDLEN];
++
++	if (strlen(sqls) + 1 > PIPECMDLEN) {
++		fprintf(stderr, "too long command");
++		exit(1);
++	}
++	strcpy(buf, sqls);
++	if (write(fd, buf, PIPECMDLEN) != PIPECMDLEN) {
++		perror("failed to write to pipe");
++		exit(1);
++	}
++	scan_data.db.nr_commands ++;
++}
++
++pid_t fork_db_creation(const char *database)
++{
++	int p[2];
++	struct stat st;
++	pid_t pid;
++
++	if (stat(database, &st) == 0) {
++		fprintf(stderr, "%s exists. remove it first\n", database);
++		exit(1);
++	}
++	if (pipe(p) == -1) {
++		fprintf(stderr, "failed to pipe");
++		exit(1);
++	}
++
++	pid = fork();
++	if (pid == (pid_t)-1) {
++		fprintf(stderr, "failed to fork");
++		exit(1);
++	}
++	if (pid == (pid_t)0) {
++		/* child, read data written by parent and write to
++		 * database */
++		close(p[1]);
++		create_full_db(database, p[0]);
++		close(p[0]);
++		exit(0);
++	}
++
++	/* parent, read inodes and write them to pipe */
++	close(p[0]);
++	scan_data.db.fd = p[1];
++	return pid;
++}
++
++void database_iscan_action(ext2_ino_t ino, struct ext2_inode *inode,
++			   int fd, char *buf)
++{
++	char *sqls;
++
++	if (LINUX_S_ISDIR(inode->i_mode)) {
++		if (ino == EXT2_ROOT_INO) {
++			sqls = sqlite3_mprintf("%s (%u,%u,%u,'%q',%u,%u,%u,%u)",
++					       "insert into dirs values",
++					       ino, inode->i_generation, ino, "/",
++					       inode->i_size, inode->i_mtime,
++					       inode->i_ctime, inode->i_dtime);
++			write_sql_command(fd, sqls);
++			sqlite3_free(sqls);
++		}
++
++		if (ext2fs_block_iterate2(fs, ino, 0, buf,
++					  block_iterate_cb, &ino)) {
++			fprintf(stderr, "ext2fs_block_iterate2 failed\n");
++			exit(1);
++		}
++	}
++}
++
++/*
++ * callback for ext2fs_dblist_dir_iterate to be called for each
++ * directory entry
++ */
++int database_dblist_iterate_cb(ext2_ino_t dir, struct ext2_dir_entry *dirent,
++			       int namelen, int fd)
++{
++	struct ext2_inode inode;
++	char *table;
++	char *sqls;
++	errcode_t retval;
++	char str[256];
++
++	if (!ext2fs_fast_test_inode_bitmap(fs->inode_map, dirent->inode))
++		/* entry of deleted file? can that ever happen */
++		return 0;
++
++	retval = ext2fs_read_inode(fs, dirent->inode, &inode);
++	if (retval) {
++		com_err("ext2fs_read_inode", retval, "while reading inode");
++		exit(1);
++	}
++
++	if (LINUX_S_ISDIR(inode.i_mode))
++		table = "dirs";
++	else
++		table = "files";
++
++	sprintf(str, "%.*s", namelen, dirent->name);
++	sqls = sqlite3_mprintf("%s %s %s (%u,%u,%u,'%q',%u,%u,%u,%u)",
++			       "insert into", table, "values",
++			       dirent->inode, inode.i_generation, dir,
++			       str,
++			       inode.i_size, inode.i_mtime,
++			       inode.i_ctime, inode.i_dtime);
++	write_sql_command(fd, sqls);
++	sqlite3_free(sqls);
++
++	return 0;
++}
++
++#else
++
++pid_t fork_db_creation(const char *database)
++{
++	return 0;
++}
++
++void database_iscan_action(ext2_ino_t ino, struct ext2_inode *inode,
++			   int fd, char *buf)
++{
++	return;
++}
++
++int database_dblist_iterate_cb(ext2_ino_t dir, struct ext2_dir_entry *dirent,
++			       int namelen, int fd)
++{
++	return 0;
++}
++
++#endif
+Index: e2fsprogs-1.41.12/e2scan/e2scan.8.in
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ e2fsprogs-1.41.12/e2scan/e2scan.8.in	2010-08-27 17:32:45.000000000 -0400
+@@ -0,0 +1,116 @@
++.TH e2scan 1 "2006 Sep 26" Lustre "backup utilities"
++.SH NAME
++e2scan \- scan an Ext2-type filesystem for modified inodes
++.SH SYNOPSIS
++.br
++.B e2scan
++@E2SCAN_MAN@{
++.B -l
++@E2SCAN_MAN@|
++@E2SCAN_MAN@.B -f
++@E2SCAN_MAN@}
++[
++.BI -a " groups"
++] [
++.BI -b " blocks"
++] [
++.BI -C " chdir"
++] [
++@E2SCAN_MAN@.BI -d " database"
++@E2SCAN_MAN@] [
++.BI -n " filename"
++] [
++.BI -N " date"
++] [
++.BI -o " outfile"
++]
++.I device
++.br
++.SH DESCRIPTION
++.BR e2scan ,
++iterates all inodes on
++.IR device ,
++find inodes modified since the specified time (default 1 day), and prints
++their pathnames relative to the root of the filesystem.  This allows the
++pathnames to be used as input to a backup tool running in the mountpoint, like
++.BR "tar \-C" ,
++as the filesystem may be mounted at an arbitrary mountpoint.
++
++The
++.B e2scan
++program is optimized for scanning an entire filesystem for (modified) files,
++but is not efficient for smaller subdirectory scans.  Use
++.BR find (1)
++for that purpose instead.
++.SH OPTIONS
++.TP
++.BI \-a " groups"
++Set readahead for inode table blocks to get better performance when scanning
++.IR device .
++Default is 1 group of readahead.
++.TP
++.BI \-b " inode_buffer_blocks"
++Set number of inode blocks to read from disk at a time.
++.TP
++.BI \-C " directory"
++Specify the working directory (relative to the root of the filesystem
++being scanned) for the output pathnames.  Only directories underneath
++the root will be candidates for listing.  For Lustre MDT filesystems the
++pathname must be prefixed with "/ROOT" to dump the client visible filesystem.
++@E2SCAN_MAN@.TP
++@E2SCAN_MAN@.BI \-d " database_file"
++@E2SCAN_MAN@Specify output file for database when running in
++@E2SCAN_MAN@.B \-f
++@E2SCAN_MAN@mode.
++.TP
++.B \-D
++Also include directories in the output.  The default is to only list files,
++because tools like
++.BR tar (1)
++will recurse into directories and files that are also listed therein will be
++backed up twice.
++@E2SCAN_MAN@.TP
++@E2SCAN_MAN@.B \-f
++@E2SCAN_MAN@List files in the filesystem and insert them into the
++@E2SCAN_MAN@.BR sqlite3 (1)
++@E2SCAN_MAN@database named by the
++@E2SCAN_MAN@.B \-d
++@E2SCAN_MAN@option.
++.TP
++.B \-l
++List files in the filesystem to standard output, or to the file specified
++with the
++.B \-o
++option.  This is the default mode.
++.TP
++.BI \-n " filename"
++Dump only files newer than the specified
++.IR filename .
++.TP
++.BI \-N " date"
++Dump only files newer than the specified date.  This supports a wide
++variety of input formats like "YYYY-MM-DD HH:MM:SS".  Use a date of
++.R 0
++to dump all files.
++.TP
++.BI \-o " outfile"
++Record the files found into
++.I outfile
++instead of the default standard output.
++.SH EXAMPLES
++To dump all of the files in the filesystem into the file
++.IR myfilelist :
++.IP
++e2scan -N 0 -o myfilelist /dev/sdb1
++.PP
++To list files and directories newer than Feb 6, 2007 in the /home directory:
++.IP
++e2scan -D -N "Feb 6 00:00:00 2007" -C /home /dev/sdb1
++.PP
++.SH AUTHOR
++This version of
++.B e2scan
++was originally written by Vladimir Saviliev <vladimir.saviliev@sun.com>
++and Andreas Dilger <adilger@sun.com>.
++.SH SEE ALSO
++.BR find (1)
+Index: e2fsprogs-1.41.12/e2scan/e2scan.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ e2fsprogs-1.41.12/e2scan/e2scan.c	2010-08-27 17:32:45.000000000 -0400
+@@ -0,0 +1,640 @@
++#define _GNU_SOURCE
++#define _FILE_OFFSET_BITS 64
++#define _XOPEN_SOURCE		/* for getdate */
++#define _XOPEN_SOURCE_EXTENDED	/* for getdate */
++
++#include <stdio.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++#include <ext2fs/ext2fs.h>
++#include <string.h>
++#include <limits.h>
++#include <sys/wait.h>
++#include <sys/errno.h>
++
++ext2_filsys fs;
++const char *database = "e2scan.db";
++int readahead_groups = 1; /* by default readahead one group inode table */
++FILE *outfile;
++
++void usage(char *prog)
++{
++	fprintf(stderr,
++#if defined(HAVE_SQLITE3) && defined(HAVE_SQLITE3_H)
++		"\nUsage: %s {-l | -f} [ options ] device-filename\nModes:"
++		"\t-f: create file database\n"
++#else
++		"\nUsage: %s -l [ options ] device-filename\nModes:"
++#endif
++		"\t-l: list recently changed files\n"
++		"Options:\n"
++		"\t-a groups: readahead 'groups' inode tables (default %d)\n"
++		"\t-b blocks: buffer 'blocks' inode table blocks\n"
++		"\t-C chdir: list files relative to 'chdir' in filesystem\n"
++		"\t-d database: output database filename (default %s)\n"
++		"\t-D: list not only files, but directories as well\n"
++		"\t-n filename: list files newer than 'filename'\n"
++		"\t-N date: list files newer than 'date' (default 1 day, "
++							 "0 for all files)\n"
++		"\t-o outfile: output file list to 'outfile'\n",
++		prog, readahead_groups, database);
++	exit(1);
++}
++
++#define SM_NONE 0
++#define SM_DATABASE 1 /* -f */
++#define SM_FILELIST 2 /* -l */
++
++struct {
++	int mode;
++	int nr;
++	union {
++		struct {
++			int fd;
++			int nr_commands;
++		} db;
++		struct {
++			/* number of files newer than specified time */
++			ext2_ino_t nr_files;
++			ext2_ino_t nr_dirs;
++			/* number of files reported */
++			ext2_ino_t nr_reported;
++			time_t mtimestamp;
++			time_t ctimestamp;
++			int with_dirs;
++		} fl;
++	};
++} scan_data = { .mode = SM_FILELIST, };
++
++/* db.c */
++pid_t fork_db_creation(const char *database);
++void database_iscan_action(ext2_ino_t ino,
++			   struct ext2_inode *inode, int fd, char *buf);
++int database_dblist_iterate_cb(ext2_ino_t dir, struct ext2_dir_entry *dirent,
++			       int namelen, int fd);
++
++/* filelist.c */
++void filelist_iscan_action(ext2_ino_t ino,
++			   struct ext2_inode *inode, char *buf);
++int filelist_dblist_iterate_cb(ext2_ino_t dirino,
++			       struct ext2_dir_entry *dirent,
++			       int namelen);
++int create_root_dentries(char *root);
++void report_root(void);
++
++
++static void get_timestamps(const char *filename)
++{
++	struct stat st;
++
++	if (stat(filename, &st) == -1) {
++		perror("failed to stat file");
++		exit(1);
++	}
++	scan_data.fl.mtimestamp = st.st_mtime;
++	scan_data.fl.ctimestamp = st.st_ctime;
++}
++
++/*
++ * callback for ext2fs_block_iterate2, it adds directory leaf blocks
++ * to dblist
++ */
++int block_iterate_cb(ext2_filsys fs, blk_t  *block_nr,
++		     e2_blkcnt_t blockcnt,
++		     blk_t ref_block EXT2FS_ATTR((unused)),
++		     int ref_offset EXT2FS_ATTR((unused)),
++		     void *priv_data)
++{
++	int ret;
++	ext2_ino_t *ino;
++
++	if ((int) blockcnt < 0)
++		/* skip indirect blocks */
++		return 0;
++	ret = 0;
++	ino = priv_data;
++	if (ext2fs_add_dir_block(fs->dblist, *ino, *block_nr, (int) blockcnt))
++		ret |= BLOCK_ABORT;
++
++	return ret;
++}
++
++/*
++ * done_group callback for inode scan.
++ * When i-th group of inodes is scanned over, readahead for i+2-th
++ * group is issued. Inode table readahead for two first groups is
++ * issued before scan begin.
++ */
++errcode_t done_group_callback(ext2_filsys fs, ext2_inode_scan scan,
++			      dgrp_t group, void *vp)
++{
++	dgrp_t ra_group;
++	unsigned long ra_start;
++	int ra_size;
++
++	if (readahead_groups <= 0)
++		return 0;
++
++	if (((group + 1) % readahead_groups) != 0)
++		return 0;
++
++	ra_group = group + 1 + readahead_groups;
++	if (ra_group >= fs->group_desc_count)
++		return 0;
++
++	ra_start = fs->group_desc[ra_group].bg_inode_table;
++	if (ra_group + readahead_groups > fs->group_desc_count)
++		ra_size = fs->group_desc_count - ra_group;
++	else
++		ra_size = readahead_groups;
++
++	ra_size *= fs->inode_blocks_per_group;
++	io_channel_readahead(fs->io, ra_start, ra_size);
++	return 0;
++}
++
++#define DEFAULT_CHUNK_SIZE 16
++__u32 chunk_size; /* in blocks */
++int nr_chunks;
++
++struct chunk {
++	__u32 start;
++	__u32 covered;
++} *cur_chunk, *ra_chunk, *chunks;
++
++/* callback for ext2fs_dblist_iterate */
++static int fill_chunks(ext2_filsys fs, struct ext2_db_entry *db_info,
++		       void *priv_data)
++{
++	__u32 cur;
++
++	cur = db_info->blk / chunk_size;
++	if (cur_chunk == NULL || cur != cur_chunk->start) {
++		/* new sweep starts */
++		if (cur_chunk == NULL)
++			cur_chunk = chunks;
++		else
++			cur_chunk ++;
++
++		cur_chunk->start = cur;
++		cur_chunk->covered = 1;
++	} else
++		cur_chunk->covered ++;
++
++	return 0;
++}
++
++/* callback for ext2fs_dblist_iterate */
++static int count_chunks(ext2_filsys fs, struct ext2_db_entry *db_info,
++			void *priv_data)
++{
++	__u32 cur;
++	static __u32 prev = (__u32)-1;
++
++	cur = db_info->blk / chunk_size;
++	if (cur != prev) {
++		nr_chunks ++;
++		prev = cur;
++	}
++	return 0;
++}
++
++/* create list of chunks, readahead two first of them */
++static void make_chunk_list(ext2_dblist dblist)
++{
++	chunk_size = readahead_groups * DEFAULT_CHUNK_SIZE;
++	if (chunk_size == 0)
++		return;
++
++	ext2fs_dblist_iterate(dblist, count_chunks, NULL);
++	chunks = malloc(sizeof(struct chunk) * nr_chunks);
++	if (chunks == NULL) {
++		fprintf(stderr, "malloc failed\n");
++		exit(1);
++	}
++	ext2fs_dblist_iterate(dblist, fill_chunks, NULL);
++
++	/* start readahead for two first chunks */
++	ra_chunk = chunks;
++	cur_chunk = NULL;
++
++	io_channel_readahead(fs->io,
++			     ra_chunk->start * chunk_size,
++			     chunk_size);
++	ra_chunk ++;
++	if (ra_chunk < chunks + nr_chunks)
++		io_channel_readahead(fs->io,
++				     ra_chunk->start * chunk_size,
++				     chunk_size);
++}
++
++/*
++ * this is called for each directory block when it is read by dblist
++ * iterator
++ */
++static int dblist_readahead(void *vp)
++{
++	if (chunk_size == 0)
++		return 0;
++	if (cur_chunk == NULL)
++		cur_chunk = chunks;
++	if (--cur_chunk->covered == 0) {
++		/*
++		 * last block of current chunk is read, readahead
++		 * chunk is under I/O, get new readahead chunk, move
++		 * current chunk
++		 */
++		cur_chunk ++;
++		ra_chunk ++;
++		if (ra_chunk < chunks + nr_chunks)
++			io_channel_readahead(fs->io,
++					     ra_chunk->start * chunk_size,
++					     chunk_size);
++	}
++	return 0;
++}
++
++/*
++ * callback for ext2fs_dblist_dir_iterate to be called for each
++ * directory entry, perform actions common for both database and
++ * filelist modes, call specific functions depending on the mode
++ */
++static int dblist_iterate_cb(ext2_ino_t dirino, int entry,
++			     struct ext2_dir_entry *dirent,
++			     int offset EXT2FS_ATTR((unused)),
++			     int blocksize EXT2FS_ATTR((unused)),
++			     char *buf EXT2FS_ATTR((unused)),
++			     void *private)
++{
++	int namelen;
++
++	if (offset == 0) {
++		/* new directory block is read */
++		scan_data.nr ++;
++		dblist_readahead(NULL);
++	}
++
++	if (dirent->inode == 0)
++		return 0;
++
++	namelen = (dirent->name_len & 0xFF);
++	if (namelen == 2 && !strncmp(dirent->name, "..", 2))
++		return 0;
++
++	if (namelen == 1 && !strncmp(dirent->name, ".", 1))
++		return 0;
++
++	if (dirent->inode > fs->super->s_inodes_count) {
++		fprintf(stderr, "too big ino %u (%.*s)\n",
++			dirent->inode, namelen, dirent->name);
++		exit(1);
++	}
++
++	if (scan_data.mode == SM_DATABASE)
++		return database_dblist_iterate_cb(dirino, dirent, namelen,
++						  scan_data.db.fd);
++
++	return filelist_dblist_iterate_cb(dirino, dirent, namelen);
++}
++
++int main(int argc, char **argv)
++{
++	char *root = "/";
++	int inode_buffer_blocks = 0;
++	errcode_t retval;
++	char *block_buf;
++	ext2_inode_scan scan;
++	struct ext2_inode inode;
++	ext2_ino_t ino;
++	dgrp_t nr;
++	time_t t;
++	int c;
++	pid_t pid;
++
++	/*
++	 * by default find for files which are modified less than one
++	 * day ago
++	 */
++	scan_data.fl.mtimestamp = time(NULL) - 60 * 60 * 24;
++	scan_data.fl.ctimestamp = scan_data.fl.mtimestamp;
++	outfile = stdout;
++
++	opterr = 0;
++#if defined(HAVE_SQLITE3) && defined(HAVE_SQLITE3_H)
++#define OPTF "f"
++#else
++#define OPTF ""
++#endif
++	while ((c = getopt(argc, argv, "a:b:C:d:D"OPTF"hln:N:o:")) != EOF) {
++		char *end;
++
++		switch (c) {
++		case 'a':
++			if (optarg == NULL)
++				usage(argv[0]);
++			readahead_groups = strtoul(optarg, &end, 0);
++			if (*end) {
++				fprintf(stderr, "%s: bad -a argument '%s'\n",
++					argv[0], optarg);
++				usage(argv[0]);
++			}
++			break;
++		case 'b':
++			inode_buffer_blocks = strtoul(optarg, &end, 0);
++			if (*end) {
++				fprintf(stderr, "%s: bad -b argument '%s'\n",
++					argv[0], optarg);
++				usage(argv[0]);
++			}
++			break;
++		case 'C':
++			root = optarg;
++			break;
++		case 'd':
++			database = optarg;
++			break;
++		case 'D':
++			scan_data.fl.with_dirs = 1;
++			break;
++		case 'f':
++#if !defined(HAVE_SQLITE3) || !defined(HAVE_SQLITE3_H)
++			fprintf(stderr,
++				"%s: sqlite3 was not detected on configure, "
++				"database creation is not supported\n",argv[0]);
++			return 1;
++#endif
++			scan_data.mode = SM_DATABASE;
++			break;
++		case 'l':
++			scan_data.mode = SM_FILELIST;
++			break;
++		case 'n':
++			get_timestamps(optarg);
++			break;
++		case 'N': {
++			const char *fmts[] = {"%c", /*date/time current locale*/
++					      "%Ec",/*date/time alt. locale*/
++					      "%a%t%b%t%d,%t%Y%t%H:%M:%S",
++					      "%a,%t%d%t%b%t%Y%t%H:%M:%S",
++					      "%a%t%b%t%d%t%H:%M:%S%t%Z%t%Y",
++					      "%a%t%b%t%d%t%H:%M:%S%t%Y",
++					      "%b%t%d%t%H:%M:%S%t%Z%t%Y",
++					      "%b%t%d%t%H:%M:%S%t%Y",
++					      "%x%t%X",/*date time*/
++					      "%Ex%t%EX",/*alternate date time*/
++					      "%F", /*ISO 8601 date*/
++					      "%+", /*`date` format*/
++					      "%s", /*seconds since epoch */
++					      NULL,
++					    };
++			const char **fmt;
++			char *ret;
++			struct tm tmptm, *tm = NULL;
++			time_t now = time(0);
++
++			tmptm = *localtime(&now);
++
++			for (fmt = &fmts[0]; *fmt != NULL; fmt++) {
++				if (strptime(optarg, *fmt, &tmptm) != NULL) {
++					tm = &tmptm;
++					break;
++				}
++			}
++
++			if (tm == NULL) {
++				fprintf(stderr, "%s: bad -N argument '%s'\n",
++					argv[0], optarg);
++				usage(argv[0]);
++			}
++			scan_data.fl.mtimestamp = mktime(tm);
++			scan_data.fl.ctimestamp = scan_data.fl.mtimestamp;
++			break;
++			}
++		case 'o':
++			outfile = fopen(optarg, "w");
++			if (outfile == NULL) {
++				fprintf(stderr, "%s: can't open '%s': %s\n",
++					argv[0], optarg, strerror(errno));
++				usage(argv[0]);
++			}
++			break;
++		default:
++			fprintf(stderr, "%s: unknown option '-%c'\n",
++				argv[0], optopt);
++		case 'h':
++			usage(argv[0]);
++		}
++	}
++
++	if (scan_data.mode == SM_NONE || argv[optind] == NULL)
++		usage(argv[0]);
++
++
++	fprintf(stderr, "generating list of files with\n"
++		"\tmtime newer than %s"
++		"\tctime newer than %s",
++		ctime(&scan_data.fl.mtimestamp),
++		ctime(&scan_data.fl.ctimestamp));
++
++	retval = ext2fs_open(argv[optind], EXT2_FLAG_SOFTSUPP_FEATURES,
++			     0, 0, unix_io_manager, &fs);
++	if (retval != 0) {
++		com_err("ext2fs_open", retval, "opening %s\n", argv[optind]);
++		return 1;
++	}
++
++	t = time(NULL);
++
++	for (nr = 0; nr < fs->group_desc_count; nr ++)
++		io_channel_readahead(fs->io,
++				     fs->group_desc[nr].bg_inode_bitmap, 1);
++	retval = ext2fs_read_inode_bitmap(fs);
++	if (retval) {
++		com_err("ext2fs_read_inode_bitmap", retval,
++			"opening inode bitmap on %s\n", argv[optind]);
++		exit(1);
++	}
++	fprintf(stderr, "inode bitmap is read, %ld seconds\n", time(NULL) - t);
++
++
++	if (inode_buffer_blocks == 0)
++		inode_buffer_blocks = fs->inode_blocks_per_group;
++
++	retval = ext2fs_open_inode_scan(fs, inode_buffer_blocks, &scan);
++	if (retval) {
++		com_err("ext2fs_open_inode_scan", retval,
++			"opening inode scan on %s\n", argv[optind]);
++		fprintf(stderr, "failed to open inode scan\n");
++		exit(1);
++	}
++	ext2fs_set_inode_callback(scan, done_group_callback, NULL);
++
++	retval = ext2fs_init_dblist(fs, NULL);
++	if (retval) {
++		com_err("ext2fs_init_dblist", retval,
++			"initializing dblist\n");
++		exit(1);
++	}
++
++	block_buf = (char *)malloc(fs->blocksize * 3);
++	if (block_buf == NULL) {
++		fprintf(stderr, "%s: failed to allocate memory for block_buf\n",
++			argv[0]);
++		exit(1);
++	}
++	memset(block_buf, 0, fs->blocksize * 3);
++
++	switch (scan_data.mode) {
++	case SM_DATABASE:
++		pid = fork_db_creation(database);
++		break;
++
++	case SM_FILELIST:
++		c = create_root_dentries(root);
++		if (c == ENOENT && strncmp(root, "/ROOT", 5) != 0) {
++			/* Try again with prepending "/ROOT" */
++			char newroot[PATH_MAX];
++			if (snprintf(newroot, PATH_MAX, "/ROOT/%s", root) >=
++			    PATH_MAX) {
++				fprintf(stderr, "%s: root path '%s' too long\n",
++					argv[0], root);
++				exit(1);
++			}
++			if (create_root_dentries(newroot) == 0)
++				c = 0;
++		}
++		if (c == ENOENT)
++			fprintf(stderr,
++				"%s: visible filesystem root '%s' not found\n",
++				argv[0], root);
++		else if (c == EIO)
++			fprintf(stderr,
++				"%s: error reading visible root: '%s'\n",
++				argv[0], root);
++		else if (c == ENOTDIR)
++			fprintf(stderr,
++			       "%s: visible root '%s' not a directory\n",
++			       argv[0], root);
++		if (c)
++			exit(1);
++		break;
++	default:
++		break;
++	}
++
++	t = time(NULL);
++	fprintf(stderr, "scanning inode tables .. ");
++	scan_data.nr = 0;
++
++	done_group_callback(fs, scan, -readahead_groups * 2, NULL);
++	done_group_callback(fs, scan, -readahead_groups, NULL);
++	while (ext2fs_get_next_inode(scan, &ino, &inode) == 0) {
++		if (ino == 0)
++			break;
++
++		scan_data.nr ++;
++		if (ext2fs_fast_test_inode_bitmap(fs->inode_map, ino) == 0)
++			/* deleted - always skip for now */
++			continue;
++		switch (scan_data.mode) {
++		case SM_DATABASE:
++			database_iscan_action(ino, &inode, scan_data.db.fd,
++					      block_buf);
++			break;
++
++		case SM_FILELIST:
++			filelist_iscan_action(ino, &inode, block_buf);
++			break;
++
++		default:
++			break;
++		}
++	}
++
++	switch (scan_data.mode) {
++	case SM_DATABASE:
++		fprintf(stderr,
++			"done\n\t%d inodes, %ld seconds\n",
++			scan_data.nr, time(NULL) - t);
++		break;
++
++	case SM_FILELIST:
++		fprintf(stderr, "done\n\t%d inodes, %ld seconds, %d files, "
++			"%d dirs to find\n",
++			scan_data.nr, time(NULL) - t, scan_data.fl.nr_files,
++			scan_data.fl.nr_dirs);
++		if (scan_data.fl.nr_files == 0 && scan_data.fl.nr_dirs == 0) {
++			ext2fs_close_inode_scan(scan);
++			ext2fs_close(fs);
++			free(block_buf);
++			return 0;
++		}
++		break;
++
++	default:
++		break;
++	}
++
++	t = time(NULL);
++	fprintf(stderr, "scanning directory blocks (%u).. ",
++		ext2fs_dblist_count(fs->dblist));
++
++	/* root directory does not have name, handle it separately */
++	report_root();
++	/*
++	 * we have a list of directory leaf blocks, blocks are sorted,
++	 * but can be not very sequential. If such blocks are close to
++	 * each other, read throughput can be improved if blocks are
++	 * read not sequentially, but all at once in a big
++	 * chunk. Create list of those chunks, it will be then used to
++	 * issue readahead
++	 */
++	make_chunk_list(fs->dblist);
++
++	scan_data.nr = 0;
++	retval = ext2fs_dblist_dir_iterate(fs->dblist,
++					   DIRENT_FLAG_INCLUDE_EMPTY,
++					   block_buf,
++					   dblist_iterate_cb, NULL);
++	if (retval) {
++		com_err("ext2fs_dblist_dir_iterate", retval,
++			"dir iterating dblist\n");
++		exit(1);
++	}
++	if (chunk_size)
++		free(chunks);
++
++	switch (scan_data.mode) {
++	case SM_DATABASE:
++	{
++		int status;
++
++		fprintf(stderr,
++			"done\n\t%d blocks, %ld seconds, "
++			"%d records sent to database\n",
++			scan_data.nr, time(NULL) - t, scan_data.db.nr_commands);
++		close(scan_data.db.fd);
++		waitpid(pid, &status, 0);
++		if (WIFEXITED(status))
++			fprintf(stderr, "database creation exited with %d\n",
++				WEXITSTATUS(status));
++		break;
++	}
++
++	case SM_FILELIST:
++		fprintf(stderr,
++			"done\n\t%d blocks, %ld seconds, %d files reported\n",
++			scan_data.nr, time(NULL) - t, scan_data.fl.nr_reported);
++		break;
++
++	default:
++		break;
++	}
++
++	ext2fs_close_inode_scan(scan);
++	ext2fs_close(fs);
++	free(block_buf);
++
++	return 0;
++}
+Index: e2fsprogs-1.41.12/e2scan/Makefile.in
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ e2fsprogs-1.41.12/e2scan/Makefile.in	2010-08-27 17:32:45.000000000 -0400
+@@ -0,0 +1,104 @@
++#
++# Standard e2fsprogs prologue....
++#
++
++srcdir = @srcdir@
++top_srcdir = @top_srcdir@
++VPATH = @srcdir@
++top_builddir = ..
++my_dir = e2scan
++INSTALL = @INSTALL@
++SQLITE3_LIB = @SQLITE3_LIB@
++
++@MCONFIG@
++
++PROGS=		e2scan
++MANPAGES=	e2scan.8
++
++MK_CMDS=	_SS_DIR_OVERRIDE=../lib/ss ../lib/ss/mk_cmds
++
++E2SCAN_OBJS=e2scan.o db.o filelist.o
++
++SRCS=$(srcdir)/e2scan.c $(srcdir)/filelist.c $(srcdir)/db.c
++
++LIBS=$(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(LIBBLKID) \
++	$(LIBUUID) $(SQLITE3_LIB)
++DEPLIBS=$(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(DEPLIBBLKID) $(DEPLIBUUID)
++
++.c.o:
++	@echo "	CC $<"
++	@$(CC) -c $(ALL_CFLAGS) $< -o $@
++
++all:: $(PROGS) $(MANPAGES)
++
++e2scan: $(E2SCAN_OBJS) $(DEPLIBS)
++	@$(CC) $(ALL_LDFLAGS) -o e2scan $(E2SCAN_OBJS) $(LIBS)
++
++e2scan.8: $(DEP_SUBSTITUTE) $(srcdir)/e2scan.8.in
++	@echo "	SUBST $@"
++	@$(SUBSTITUTE_UPTIME) $(srcdir)/e2scan.8.in e2scan.8
++
++installdirs:
++	@echo "	MKINSTALLDIRS $(sbindir) $(man8dir)"
++	@$(MKINSTALLDIRS) $(DESTDIR)$(sbindir) \
++		$(DESTDIR)$(man8dir)
++
++install: $(PROGS) $(MANPAGES) installdirs
++	@for i in $(PROGS); do \
++		echo "	INSTALL $(sbindir)/$$i"; \
++		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(sbindir)/$$i; \
++	done
++	@for i in $(MANPAGES); do \
++		for j in $(COMPRESS_EXT); do \
++			$(RM) -f $(DESTDIR)$(man8dir)/$$i.$$j; \
++		done; \
++		echo "	INSTALL_DATA $(man8dir)/$$i"; \
++		$(INSTALL_DATA) $$i $(DESTDIR)$(man8dir)/$$i; \
++	done
++
++install-strip: install
++	@for i in $(PROGS); do \
++		echo "	STRIP $(sbindir)/$$i"; \
++		$(STRIP) $(DESTDIR)$(sbindir)/$$i; \
++	done
++
++uninstall:
++	for i in $(PROGS); do \
++		$(RM) -f $(DESTDIR)$(sbindir)/$$i; \
++	done
++	for i in $(MANPAGES); do \
++		$(RM) -f $(DESTDIR)$(man8dir)/$$i; \
++	done
++
++#check::
++#	./correct_test1 Makefile out
++#	./correct_test2
++
++clean:
++	$(RM) -f e2scan correct_test1 correct_test2 e2scan.8 \#* *.s *.o *.a *~ core out
++
++mostlyclean: clean
++distclean: clean
++	$(RM) -f debug_cmds.c .depend Makefile $(srcdir)/TAGS \
++		$(srcdir)/Makefile.in.old
++
++# +++ Dependency line eater +++
++#
++# Makefile dependencies follow.  This must be the last section in
++# the Makefile.in file
++#
++filelist.o: $(srcdir)/filelist.c $(top_srcdir)/lib/ext2fs/ext2_fs.h \
++ $(top_builddir)/lib/ext2fs/ext2_types.h $(top_srcdir)/lib/ext2fs/ext2fs.h \
++ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_srcdir)/lib/et/com_err.h \
++ $(top_srcdir)/lib/ext2fs/ext2_io.h $(top_builddir)/lib/ext2fs/ext2_err.h \
++ $(top_srcdir)/lib/ext2fs/bitops.h
++db.o: $(srcdir)/db.c $(top_srcdir)/lib/ext2fs/ext2_fs.h \
++ $(top_builddir)/lib/ext2fs/ext2_types.h $(top_srcdir)/lib/ext2fs/ext2fs.h \
++ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_srcdir)/lib/et/com_err.h \
++ $(top_srcdir)/lib/ext2fs/ext2_io.h $(top_builddir)/lib/ext2fs/ext2_err.h \
++ $(top_srcdir)/lib/ext2fs/bitops.h
++e2scan.o: $(srcdir)/e2scan.c \
++ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \
++ $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext2_fs.h \
++ $(top_srcdir)/lib/et/com_err.h $(top_srcdir)/lib/ext2fs/ext2_io.h \
++ $(top_builddir)/lib/ext2fs/ext2_err.h $(top_srcdir)/lib/ext2fs/bitops.h
+Index: e2fsprogs-1.41.12/Makefile.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/Makefile.in	2010-05-17 23:48:22.000000000 -0400
++++ e2fsprogs-1.41.12/Makefile.in	2010-08-27 17:32:45.000000000 -0400
+@@ -13,9 +13,10 @@
+ @DEBUGFS_CMT@DEBUGFS_DIR= debugfs
+ @UUID_CMT@UUID_LIB_SUBDIR= lib/uuid
+ @BLKID_CMT@BLKID_LIB_SUBDIR= lib/blkid
++@E2SCAN_CMT@E2SCAN_DIR= e2scan
+ 
+ LIB_SUBDIRS=lib/et lib/ss lib/e2p $(UUID_LIB_SUBDIR) lib/ext2fs $(BLKID_LIB_SUBDIR) intl
+-PROG_SUBDIRS=e2fsck $(DEBUGFS_DIR) misc $(RESIZE_DIR) tests/progs po
++PROG_SUBDIRS=e2fsck $(DEBUGFS_DIR) misc $(RESIZE_DIR) tests/progs po $(E2SCAN_DIR)
+ SUBDIRS=util $(LIB_SUBDIRS) $(PROG_SUBDIRS) tests
+ 
+ SUBS= lib/ext2fs/ext2_types.h lib/blkid/blkid_types.h lib/uuid/uuid_types.h
+@@ -60,7 +61,7 @@
+ 
+ install: subs all-libs-recursive install-progs-recursive \
+   install-shlibs-libs-recursive install-doc-libs
+-	if test ! -d e2fsck && test ! -d debugfs && test ! -d misc && test ! -d ext2ed ; then $(MAKE) install-libs ; fi
++	if test ! -d e2fsck && test ! -d debugfs && test ! -d e2scan && test ! -d misc && test ! -d ext2ed ; then $(MAKE) install-libs ; fi
+ 
+ install-strip: subs all-libs-recursive install-strip-progs-recursive \
+   install-shlibs-strip-libs-recursive install-doc-libs
+Index: e2fsprogs-1.41.12/lib/ext2fs/dblist.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/dblist.c	2010-08-27 16:02:04.000000000 -0400
++++ e2fsprogs-1.41.12/lib/ext2fs/dblist.c	2010-08-27 17:32:45.000000000 -0400
+@@ -148,7 +148,6 @@
+  * (moved to closefs.c)
+  */
+ 
+-
+ /*
+  * Add a directory block to the directory block list
+  */
+Index: e2fsprogs-1.41.12/e2scan/filelist.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ e2fsprogs-1.41.12/e2scan/filelist.c	2010-08-27 17:32:45.000000000 -0400
+@@ -0,0 +1,455 @@
++#define _GNU_SOURCE
++#define _FILE_OFFSET_BITS 64
++
++#include <stdio.h>
++#include <assert.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++#include <sys/errno.h>
++#include <search.h>
++#include <ext2fs/ext2fs.h>
++
++/* e2scan.c */
++extern ext2_filsys fs;
++extern FILE *outfile;
++extern struct {
++	int mode;
++	int nr;
++	union {
++		struct {
++			int fd;
++			int nr_commands;
++		} db;
++		struct {
++			/* number of files newer than specified time */
++			ext2_ino_t nr_files;
++			ext2_ino_t nr_dirs;
++			/* number of files reported */
++			ext2_ino_t nr_reported;
++			time_t mtimestamp;
++			time_t ctimestamp;
++			int with_dirs;
++		} fl;
++	};
++} scan_data;
++
++ext2_ino_t visible_root_ino;
++
++int block_iterate_cb(ext2_filsys fs, blk_t  *block_nr,
++		     e2_blkcnt_t blockcnt,
++		     blk_t ref_block EXT2FS_ATTR((unused)),
++		     int ref_offset EXT2FS_ATTR((unused)),
++		     void *priv_data);
++
++
++/*
++create root dentry
++    root->connected_to_root = 1
++    root->d_path = "/"
++for each directory block:
++    if (directory is not in memory)
++        create new directory dentry
++        set directory->connected_to_root = 0
++    for each entry found in directory block:
++        if (entry is a subdirectory)
++            if (subdir is in memory)
++                subdir->d_parent = directory
++                if (directory->connected_to_root)
++                    recurse for each subsubdir
++			subsubdir->connected_to_root = 1
++			subsubdir->d_parent = subdir
++			subsubdir->d_path = subdir->d_path + name
++			for each non-directory entry on subdir
++			    generate full pathname and output
++			    drop filename entry from RAM
++            else
++                create new subdir dentry
++                subdir->connected_to_root = directory->connected_to_root
++                subdir->d_parent = directory
++                if (directory->connected_to_root)
++		    subdir->d_path = directory->d_path + name
++        else if (file is interesting)
++            if (directory->connected_to_root)
++                generate full pathname and output
++            else
++		create filename entry
++                attach filename to directory
++*/
++
++struct e2scan_dentry {
++	ext2_ino_t ino;
++	struct e2scan_dentry *d_parent;
++	char *name;
++	struct e2scan_dentry *d_child; /* pointer to first of subdirs */
++	struct e2scan_dentry *d_next; /* pointer to next directory */
++	unsigned connected_to_root:1;
++	unsigned is_file:1;
++	unsigned is_dir:1;
++	unsigned not_in_root:1;
++	unsigned is_printed:1;
++};
++
++static void *dentry_tree = NULL;
++
++static int compare_ino(const void *a, const void *b)
++{
++	const struct e2scan_dentry *d1;
++	const struct e2scan_dentry *d2;
++
++	d1 = a;
++	d2 = b;
++	if (d1->ino > d2->ino)
++		return 1;
++	if (d1->ino < d2->ino)
++		return -1;
++	return 0;
++}
++
++static struct e2scan_dentry *find_dentry(ext2_ino_t ino)
++{
++	struct e2scan_dentry tmp, **pdentry;
++
++	tmp.ino = ino;
++	pdentry = tfind(&tmp, &dentry_tree, compare_ino);
++	return (pdentry == NULL) ? NULL : *pdentry;
++}
++
++static struct e2scan_dentry *find_or_create_dentry(ext2_ino_t ino, int *created)
++{
++	struct e2scan_dentry **dentry, *new;
++
++	new = calloc(1, sizeof(struct e2scan_dentry));
++	if (new == NULL) {
++		fprintf(stderr, "malloc failed");
++		exit(1);
++	}
++	new->ino = ino;
++
++	dentry = tsearch(new, &dentry_tree, compare_ino);
++	if (dentry == NULL) {
++		fprintf(stderr, "tsearch failed");
++		exit(1);
++	}
++	if (*dentry != new) {
++		*created = 0;
++		free(new);
++	} else {
++		*created = 1;
++	}
++
++	return *dentry;
++}
++
++static int is_file_interesting(ext2_ino_t ino)
++{
++	return ext2fs_fast_test_inode_bitmap(fs->inode_map, ino);
++}
++
++static void link_to_parent(struct e2scan_dentry *parent,
++			   struct e2scan_dentry *child)
++{
++	child->d_next = parent->d_child;
++	parent->d_child = child;
++	child->d_parent = parent;
++}
++
++static void dentry_attach_name(struct e2scan_dentry *dentry, int namelen,
++			       const char *name)
++{
++	if (dentry->name) {
++		if (namelen == 1 && (!strcmp(name, ".") || !strcmp(name, "/")))
++			return;
++		fprintf(stderr, "dentry name: %s, name %.*s\n",
++			dentry->name, namelen, name);
++		exit(1);
++	}
++	asprintf(&dentry->name, "%.*s", namelen, name);
++}
++
++/*
++  - look up $ROOT in the filesystem
++  - build dentry for each component of the path, starting at /
++  - for each component of the path except the last, mark dentry "not_in_root"
++*/
++int create_root_dentries(char *root)
++{
++	int created;
++	char *name;
++	ext2_ino_t ino;
++	struct e2scan_dentry *child, *parent;
++	struct ext2_inode inode;
++	char *copy, *p;
++
++	copy = p = strdup(root);
++
++	ino = EXT2_ROOT_INO;
++	name = "/";
++	parent = NULL;
++	do {
++		child = find_or_create_dentry(ino, &created);
++		dentry_attach_name(child, strlen(name), name);
++		child->connected_to_root = 1;
++		child->not_in_root = 1;
++		if (parent != NULL)
++			link_to_parent(parent, child);
++		parent = child;
++
++		name = strtok(copy, "/");
++		if (name == NULL)
++			break;
++		copy = NULL;
++
++		if (ext2fs_lookup(fs, ino, name, strlen(name), NULL, &ino))
++			return ENOENT;
++	} while (1);
++
++	if (ext2fs_read_inode(fs, ino, &inode))
++		return EIO;
++
++	if (!LINUX_S_ISDIR(inode.i_mode)) {
++		return ENOTDIR;
++	}
++	child->not_in_root = 0;
++	visible_root_ino = ino;
++	fprintf(stderr, "visible root: \"%s\"\n", root);
++
++	free(p);
++
++	return 0;
++}
++
++static inline void output_dot(void)
++{
++	fprintf(outfile, ".");
++}
++
++static inline void output_dot_newline(void)
++{
++	fprintf(outfile, ".\n");
++}
++
++static inline void output_dir_name(const char *dirname)
++{
++	fprintf(outfile, "/%s", dirname);
++}
++
++static inline void output_file_name(const char *filename, int len)
++{
++	fprintf(outfile, "/%.*s\n", len, filename);
++}
++
++static int up_path(struct e2scan_dentry *dentry)
++{
++	int len;
++
++	len = 0;
++	while (dentry->ino != visible_root_ino) {
++		if (dentry->ino == EXT2_ROOT_INO)
++			return -1;
++		dentry = dentry->d_parent;
++		len ++;
++	}
++	return len;
++}
++
++static void revert_dir_name(int path_length, struct e2scan_dentry *dentry)
++{
++	if (path_length > 0) {
++		path_length --;
++		revert_dir_name(path_length, dentry->d_parent);
++		output_dir_name(dentry->name);
++	}
++	return;
++}
++
++static void report_file_name(struct e2scan_dentry *dentry, ext2_ino_t ino,
++			     const char *name, int namelen)
++{
++	int path_up_length;
++
++	ext2fs_fast_unmark_inode_bitmap(fs->inode_map, ino);
++
++	if (ino == visible_root_ino) {
++		/* visible root is to be reported */
++		output_dot_newline();
++		scan_data.fl.nr_reported ++;
++		return;
++	}
++
++	path_up_length = up_path(dentry);
++	if (path_up_length == -1)
++		/* file is not in visible root */
++		return;
++
++	output_dot();
++	revert_dir_name(path_up_length, dentry);
++	/* the file is under visible root */
++	scan_data.fl.nr_reported ++;
++	output_file_name(name, namelen);
++}
++
++void report_root(void)
++{
++	if (EXT2_ROOT_INO == visible_root_ino &&
++	    is_file_interesting(EXT2_ROOT_INO)) {
++		output_dot_newline();
++		scan_data.fl.nr_reported ++;
++	}
++}
++
++static struct e2scan_dentry *connect_subtree_to_root(struct e2scan_dentry *dir,
++					      int not_in_root)
++{
++	struct e2scan_dentry *subdir, *prev, *p;
++
++	assert(!dir->is_file);
++	dir->connected_to_root = 1;
++	dir->not_in_root = not_in_root;
++
++	subdir = dir->d_child;
++	prev = NULL;
++	while (subdir) {
++		if (subdir->is_file) {
++			/* report filename and release dentry */
++			report_file_name(dir, subdir->ino, subdir->name,
++					 strlen(subdir->name));
++
++			if (prev == NULL)
++				dir->d_child = subdir->d_next;
++			else
++				prev->d_next = subdir->d_next;
++
++			p = tdelete(subdir, &dentry_tree, compare_ino);
++			assert(p != NULL);
++
++			free(subdir->name);
++			p = subdir->d_next;
++			free(subdir);
++			subdir = p;
++			continue;
++		}
++		if (subdir->is_dir && subdir->is_printed == 0) {
++			/* report directory name */
++			report_file_name(dir, subdir->ino, subdir->name,
++					 strlen(subdir->name));
++			subdir->is_printed = 1;
++		}
++		connect_subtree_to_root(subdir, not_in_root);
++		prev = subdir;
++		subdir = subdir->d_next;
++	}
++	return NULL;
++}
++
++void filelist_iscan_action(ext2_ino_t ino,
++			   struct ext2_inode *inode, char *buf)
++{
++	int created;
++	struct e2scan_dentry *dentry;
++	int to_be_listed;
++
++	if (!LINUX_S_ISDIR(inode->i_mode) &&
++	    (inode->i_flags & EXT2_NODUMP_FL)) {
++		/* skip files which are not to be backuped */
++		ext2fs_fast_unmark_inode_bitmap(fs->inode_map, ino);
++		return;
++	}
++
++	to_be_listed = (inode->i_ctime < scan_data.fl.ctimestamp &&
++			inode->i_mtime < scan_data.fl.mtimestamp) ? 0 : 1;
++	if (LINUX_S_ISDIR(inode->i_mode)) {
++		dentry = find_or_create_dentry(ino, &created);
++
++		if (ext2fs_block_iterate2(fs, ino, 0, buf,
++					  block_iterate_cb, &ino)) {
++			fprintf(stderr, "ext2fs_block_iterate2 failed\n");
++			exit(1);
++		}
++		dentry->is_dir = to_be_listed;
++	}
++	if (!to_be_listed)
++		/* too old files are not interesting */
++		ext2fs_fast_unmark_inode_bitmap(fs->inode_map, ino);
++	else {
++		/* files and directories to find names of */
++		if (LINUX_S_ISDIR(inode->i_mode)) {
++			if (scan_data.fl.with_dirs)
++				scan_data.fl.nr_dirs++;
++			else
++				ext2fs_fast_unmark_inode_bitmap(fs->inode_map,
++								ino);
++		} else
++			scan_data.fl.nr_files++;
++	}
++}
++
++int filelist_dblist_iterate_cb(ext2_ino_t dirino,
++			       struct ext2_dir_entry *dirent,
++			       int namelen)
++{
++	struct e2scan_dentry *dir, *subdir;
++	int created;
++	int ret;
++	struct ext2_dir_entry_2 *dirent2;
++	int is_dirname;
++
++	dir = find_dentry(dirino);
++	assert(dir != NULL);
++
++	dirent2 = (struct ext2_dir_entry_2 *)dirent;
++	is_dirname = (dirent2->file_type == EXT2_FT_DIR) ? 1 : 0;
++	if (is_dirname) {
++		subdir = find_dentry(dirent->inode);
++		if (subdir == NULL)
++			/* new name is encountered, skip it */
++			return 0;
++
++		if (subdir->d_parent == NULL) {
++			dentry_attach_name(subdir, namelen, dirent->name);
++			link_to_parent(dir, subdir);
++
++			if (dir->connected_to_root)
++				/*
++				 * go down and connect all subdirs to
++				 * root recursively
++				 */
++				connect_subtree_to_root(subdir,
++							dir->not_in_root);
++		}
++	}
++	if (is_file_interesting(dirent->inode)) {
++		if (dir->connected_to_root) {
++			if (is_dirname && subdir->is_printed == 0) {
++				report_file_name(dir, dirent->inode,
++						 dirent->name, namelen);
++				subdir->is_printed = 1;
++			} else
++				report_file_name(dir, dirent->inode,
++						 dirent->name, namelen);
++		} else {
++			subdir = find_or_create_dentry(dirent->inode, &created);
++			if (created) {
++				dentry_attach_name(subdir,namelen,dirent->name);
++
++				link_to_parent(dir, subdir);
++				subdir->is_file = 1;
++			} else {
++				/*
++				 * dentry exists already, hard link
++				 * encountered, nothing to do about it
++				 */
++				;
++			}
++		}
++	}
++	ret = 0;
++	if (scan_data.fl.nr_reported ==
++	    (scan_data.fl.nr_files + scan_data.fl.nr_dirs))
++		/*
++		 * names of all recently modified files are
++		 * generated, break dblist iteration
++		 */
++		ret |= DIRENT_ABORT;
++	return ret;
++}
+Index: e2fsprogs-1.41.12/util/subst.conf.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/util/subst.conf.in	2010-08-27 16:28:53.000000000 -0400
++++ e2fsprogs-1.41.12/util/subst.conf.in	2010-08-27 17:32:45.000000000 -0400
+@@ -5,6 +5,8 @@
+ E2FSPROGS_MONTH		@E2FSPROGS_MONTH@
+ E2FSPROGS_YEAR		@E2FSPROGS_YEAR@
+ E2FSPROGS_VERSION	@E2FSPROGS_VERSION@
++E2SCAN_CMT		@E2SCAN_CMT@
++E2SCAN_MAN		@E2SCAN_MAN@
+ LFSCK_CMT		@LFSCK_CMT@
+ LFSCK_MAN		@LFSCK_MAN@
+ SIZEOF_LONG_LONG	@SIZEOF_LONG_LONG@

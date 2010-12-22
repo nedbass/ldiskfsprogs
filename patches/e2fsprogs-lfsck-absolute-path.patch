@@ -1,0 +1,119 @@
+Index: e2fsprogs-1.41.6/e2fsck/lfsck.c
+===================================================================
+--- e2fsprogs-1.41.6.orig/e2fsck/lfsck.c	2009-06-13 07:12:27.000000000 -0400
++++ e2fsprogs-1.41.6/e2fsck/lfsck.c	2009-07-14 16:09:07.000000000 -0400
+@@ -214,6 +214,31 @@ int get_lov_config()
+ 	return rc;
+ }
+ 
++static char *my_dirname(char *path)
++{
++
++	if (path != NULL) {
++		char *tmp = strrchr(path, '/');
++		if (tmp != NULL) {
++			*tmp = '\0';
++			return path;
++		}
++	}
++
++	return ".";
++}
++
++static const char *my_basename(const char *path)
++{
++	if (path != NULL) {
++		char *tmp = strrchr(path, '/');
++		if (tmp != NULL)
++			return tmp + 1;
++	}
++
++	return path;
++}
++
+ int parse_args(int argc, char *argv[])
+ {
+ 	int option_index = 0;
+@@ -234,6 +259,8 @@ int parse_args(int argc, char *argv[])
+ 		{ 0, 0, 0, 0 }
+ 	};
+ 	struct mntent *mnt_info;
++	char tmp[PATH_MAX];
++	char *dbpath;
+ 	int c, found;
+ 	char *p1;
+ 	FILE *fp;
+@@ -262,11 +289,22 @@ int parse_args(int argc, char *argv[])
+ 			break;
+ 		case 'm':
+ 			VERBOSE(1, "MDSDB: %s\n", optarg);
+-			mds_file = strdup(optarg);
+-			if (mds_file == NULL) {
+-				fprintf(stderr, "error allocating mds_file\n");
++			dbpath = malloc(PATH_MAX);
++			if (dbpath == NULL) {
++				fprintf(stderr, "error allocating dbpath\n");
+ 				return -ENOMEM;
+ 			}
++			strcpy(tmp, optarg);
++			if (realpath(my_dirname(tmp), dbpath) == NULL) {
++				fprintf(stderr, "Failure to resolve path %s\n",
++					optarg);
++				free(dbpath);
++				exit(1);
++			}
++
++			strcpy(tmp, optarg);
++			sprintf(dbpath+strlen(dbpath), "/%s", my_basename(tmp));
++			mds_file = dbpath;
+ 			break;
+ 		case 'n':
+ 			lfsck_create = 0;
+@@ -281,21 +319,40 @@ int parse_args(int argc, char *argv[])
+ 			}
+ 			/* Otherwise it is another ostdb file */
+ 		case 'o':
++		{
++			char *ost_path;
++
+ 			VERBOSE(1, "OSTDB[%u]: %s\n", num_ost_files, optarg);
+ 			p1 = optarg;
+ 			do {
+-			/* Old-style arguments are comma separated */
+-				ost_files[num_ost_files] =
+-					strdup(strsep(&p1, ","));
+-				if (ost_files[num_ost_files] == NULL) {
++				dbpath = malloc(PATH_MAX);
++				if (dbpath == NULL) {
+ 					fprintf(stderr,
+-					       "error allocate ost_files[%d]\n",
+-					       num_ost_files);
++					       "error allocating dbpath\n");
+ 					return -ENOMEM;
+ 				}
++
++				/* Old-style arguments are comma separated */
++				ost_path = strsep(&p1, ",");
++				strcpy(tmp, ost_path);
++				if (realpath(my_dirname(tmp), dbpath) == NULL) {
++					fprintf(stderr, "Failure to resolve "
++						"path %s\n", optarg);
++					for (c = 0; c < num_ost_files; c++)
++						free(ost_files[c]);
++					free(dbpath);
++					exit(1);
++				}
++
++				strcpy(tmp, ost_path);
++				sprintf(dbpath+strlen(dbpath), "/%s",
++					my_basename(tmp));
++				ost_files[num_ost_files] = dbpath;
+ 				num_ost_files++;
+ 			} while (p1 != NULL);
++
+ 			break;
++		}
+ 		case 't':
+ 			num_threads = strtol(optarg, NULL, 0);
+ 			if (num_threads == ULONG_MAX)
+

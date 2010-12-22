@@ -1,0 +1,51 @@
+Add check for in-inode xattr to make sure that it is not referencing an offset
+that is beyond the end of the inode.
+
+Index: e2fsprogs-1.41.12/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass1.c
++++ e2fsprogs-1.41.12/e2fsck/pass1.c
+@@ -319,6 +319,13 @@ static void check_ea_in_inode(e2fsck_t c
+ 			goto fix;
+ 		}
+ 
++		/* Value size cannot be larger than EA space in inode */
++		if (entry->e_value_offs > storage_size ||
++		    entry->e_value_offs + entry->e_value_size > storage_size) {
++			problem = PR_1_INODE_EA_BAD_VALUE;
++			goto fix;
++		}
++
+ 		hash = ext2fs_ext_attr_hash_entry(entry,
+ 						  start + entry->e_value_offs);
+ 
+Index: e2fsprogs-1.41.12/e2fsck/problem.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.c
++++ e2fsprogs-1.41.12/e2fsck/problem.c
+@@ -890,6 +890,11 @@ static struct e2fsck_problem problem_tab
+ 	     "(size %Is, lblk %r)\n"),
+ 	  PROMPT_CLEAR, PR_PREEN_OK },
+ 
++	/* Bad extended attribute value in inode */
++	{ PR_1_INODE_EA_BAD_VALUE,
++	  N_("@a in @i %i is corrupt (@n value)."),
++	  PROMPT_CLEAR, 0},
++
+ 	/* Pass 1b errors */
+ 
+ 	/* Pass 1B: Rescan for duplicate/bad blocks */
+Index: e2fsprogs-1.41.12/e2fsck/problem.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.h
++++ e2fsprogs-1.41.12/e2fsck/problem.h
+@@ -520,6 +520,9 @@ struct problem_context {
+ /* EOFBLOCKS flag set when not necessary */
+ #define PR_1_EOFBLOCKS_FL_SET		0x010060
+ 
++/* Bad extended attribute value in inode */
++#define PR_1_INODE_EA_BAD_VALUE		0x010061
++
+ /*
+  * Pass 1b errors
+  */

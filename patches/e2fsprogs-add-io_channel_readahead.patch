@@ -1,0 +1,93 @@
+Index: e2fsprogs-1.41.1/lib/ext2fs/ext2_io.h
+===================================================================
+--- e2fsprogs-1.41.1.orig/lib/ext2fs/ext2_io.h
++++ e2fsprogs-1.41.1/lib/ext2fs/ext2_io.h
+@@ -83,6 +83,8 @@ struct struct_io_manager {
+ 					int count, void *data);
+ 	errcode_t (*write_blk64)(io_channel channel, unsigned long long block,
+ 					int count, const void *data);
++	errcode_t (*readahead)(io_channel channel, unsigned long block,
++			       int count);
+ 	long	reserved[16];
+ };
+ 
+@@ -95,6 +97,7 @@ struct struct_io_manager {
+ #define io_channel_close(c) 		((c)->manager->close((c)))
+ #define io_channel_set_blksize(c,s)	((c)->manager->set_blksize((c),s))
+ #define io_channel_read_blk(c,b,n,d)	((c)->manager->read_blk((c),b,n,d))
++#define io_channel_readahead(c,b,n)	((c)->manager->readahead((c),b,n))
+ #define io_channel_write_blk(c,b,n,d)	((c)->manager->write_blk((c),b,n,d))
+ #define io_channel_flush(c) 		((c)->manager->flush((c)))
+ #define io_channel_bumpcount(c)		((c)->refcount++)
+Index: e2fsprogs-1.41.1/lib/ext2fs/unix_io.c
+===================================================================
+--- e2fsprogs-1.41.1.orig/lib/ext2fs/unix_io.c
++++ e2fsprogs-1.41.1/lib/ext2fs/unix_io.c
+@@ -15,6 +15,9 @@
+  * %End-Header%
+  */
+ 
++#define _XOPEN_SOURCE 600
++#define _DARWIN_C_SOURCE
++#define _FILE_OFFSET_BITS 64
+ #define _LARGEFILE_SOURCE
+ #define _LARGEFILE64_SOURCE
+ 
+@@ -31,6 +34,9 @@
+ #ifdef __linux__
+ #include <sys/utsname.h>
+ #endif
++#if HAVE_SYS_TYPES_H
++#include <sys/types.h>
++#endif
+ #ifdef HAVE_SYS_IOCTL_H
+ #include <sys/ioctl.h>
+ #endif
+@@ -40,9 +46,6 @@
+ #if HAVE_SYS_STAT_H
+ #include <sys/stat.h>
+ #endif
+-#if HAVE_SYS_TYPES_H
+-#include <sys/types.h>
+-#endif
+ #if HAVE_SYS_RESOURCE_H
+ #include <sys/resource.h>
+ #endif
+@@ -88,6 +91,8 @@ static errcode_t unix_close(io_channel c
+ static errcode_t unix_set_blksize(io_channel channel, int blksize);
+ static errcode_t unix_read_blk(io_channel channel, unsigned long block,
+ 			       int count, void *data);
++static errcode_t unix_readahead(io_channel channel, unsigned long block,
++				int count);
+ static errcode_t unix_write_blk(io_channel channel, unsigned long block,
+ 				int count, const void *data);
+ static errcode_t unix_flush(io_channel channel);
+@@ -130,6 +135,7 @@ static struct struct_io_manager struct_u
+ 	unix_get_stats,
+ 	unix_read_blk64,
+ 	unix_write_blk64,
++	unix_readahead,
+ };
+ 
+ io_manager unix_io_manager = &struct_unix_manager;
+@@ -699,6 +705,20 @@ static errcode_t unix_write_blk64(io_cha
+ #endif /* NO_IO_CACHE */
+ }
+ 
++static errcode_t unix_readahead(io_channel channel, unsigned long block,
++				int count)
++{
++#ifdef POSIX_FADV_WILLNEED
++	struct unix_private_data *data;
++
++	data = (struct unix_private_data *)channel->private_data;
++	posix_fadvise(data->dev, (ext2_loff_t)block * channel->block_size,
++		      (ext2_loff_t)count * channel->block_size,
++		      POSIX_FADV_WILLNEED);
++#endif
++	return 0;
++}
++
+ static errcode_t unix_write_blk(io_channel channel, unsigned long block,
+ 				int count, const void *buf)
+ {

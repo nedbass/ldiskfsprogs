@@ -1,0 +1,18 @@
+Fix dblist size accounting in the case where ext2fs_resize_mem() fails
+to allocate a larger buffer.
+
+Signed-off-by: Andreas Dilger <adilger@sun.com>
+
+Index: e2fsprogs-1.41.12/lib/ext2fs/dblist.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/dblist.c
++++ e2fsprogs-1.41.12/lib/ext2fs/dblist.c
+@@ -168,7 +168,7 @@ errcode_t ext2fs_add_dir_block(ext2_dbli
+ 					   sizeof(struct ext2_db_entry),
+ 					   &dblist->list);
+ 		if (retval) {
+-			dblist->size -= 100;
++			dblist->size = old_size / sizeof(struct ext2_db_entry);
+ 			return retval;
+ 		}
+ 	}

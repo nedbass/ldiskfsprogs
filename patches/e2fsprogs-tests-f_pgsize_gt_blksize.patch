@@ -1,0 +1,53 @@
+Index: e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/expect.1
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/expect.1
+@@ -0,0 +1,7 @@
++Pass 1: Checking inodes, blocks, and sizes
++Pass 2: Checking directory structure
++Pass 3: Checking directory connectivity
++Pass 4: Checking reference counts
++Pass 5: Checking group summary information
++test_filesys: 12/32 files (0.0% non-contiguous), 40/100 blocks
++Exit status is 0
+Index: e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/expect.2
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/expect.2
+@@ -0,0 +1,7 @@
++Pass 1: Checking inodes, blocks, and sizes
++Pass 2: Checking directory structure
++Pass 3: Checking directory connectivity
++Pass 4: Checking reference counts
++Pass 5: Checking group summary information
++test_filesys: 12/32 files (0.0% non-contiguous), 40/100 blocks
++Exit status is 0
+Index: e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/name
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/name
+@@ -0,0 +1 @@
++i_size corruption if page-size > filesystem blocksize
+Index: e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/script
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.40.2/tests/f_pgsize_gt_blksize/script
+@@ -0,0 +1,18 @@
++SKIP_GUNZIP="true"
++
++touch $TMPFILE
++$MKE2FS -N 32 -F -o Linux -b 1024 $TMPFILE 100 > /dev/null 2>&1 
++
++DATA_FILE=$RANDOM
++dd if=/dev/zero of=$DATA_FILE bs=1k count=16 > /dev/null 2>&1
++$DEBUGFS -w $TMPFILE << EOF > /dev/null 2>&1
++write $DATA_FILE foo
++set_inode_field foo size 13000
++q
++EOF
++
++. $cmd_dir/run_e2fsck
++
++rm -f $DATA_FILE
++
++unset DATA_FILE

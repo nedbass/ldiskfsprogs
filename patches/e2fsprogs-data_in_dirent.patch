@@ -1,0 +1,572 @@
+Index: e2fsprogs-1.41.12/lib/blkid/probe.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/blkid/probe.h
++++ e2fsprogs-1.41.12/lib/blkid/probe.h
+@@ -120,6 +120,7 @@ struct ext2_super_block {
+ #define EXT4_FEATURE_INCOMPAT_MMP		0x0100
+ #define EXT4_FEATURE_INCOMPAT_FLEX_BG		0x0200
+ #define EXT4_FEATURE_INCOMPAT_EA_INODE		0x0400
++#define EXT4_FEATURE_INCOMPAT_DIRDATA		0x1000
+ 
+ #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
+ 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
+Index: e2fsprogs-1.41.12/lib/e2p/feature.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/e2p/feature.c
++++ e2fsprogs-1.41.12/lib/e2p/feature.c
+@@ -78,6 +78,8 @@ static struct feature feature_list[] = {
+ 			"mmp" },
+ 	{	E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_EA_INODE,
+ 			"large_xattr" },
++	{       E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_DIRDATA,
++			"dirdata" },
+ 	{	0, 0, 0 },
+ };
+ 
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2_fs.h
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
+@@ -673,13 +673,27 @@ struct ext2_super_block {
+ #define EXT2_FEATURE_COMPAT_SUPP	0
+ #define EXT2_FEATURE_INCOMPAT_SUPP    (EXT2_FEATURE_INCOMPAT_FILETYPE| \
+ 				       EXT4_FEATURE_INCOMPAT_MMP|\
+-				       EXT4_FEATURE_INCOMPAT_EA_INODE)
++				       EXT4_FEATURE_INCOMPAT_EA_INODE|\
++				       EXT4_FEATURE_INCOMPAT_DIRDATA)
+ #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
+ 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
+ 					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
+ 					 EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE| \
+ 					 EXT2_FEATURE_RO_COMPAT_BTREE_DIR)
+ 
++#define EXT2_FT_MASK			0x0f
++
++/* lu_fid size and NUL char */
++#define EXT2_DIRENT_LUFID_SIZE		(17 + 1)
++#define EXT2_DIRENT_LUFID		0x10
++#define EXT2_DIR_PAD			4
++#define EXT2_DIR_ROUND			(EXT2_DIR_PAD - 1)
++#define __EXT2_DIR_REC_LEN(len)		(((len) + 8 + EXT2_DIR_ROUND) & \
++					 ~EXT2_DIR_ROUND)
++
++#define EXT2_DIR_REC_LEN(de)		(__EXT2_DIR_REC_LEN(de->name_len +\
++					 ext2_get_dirent_size(de)))
++
+ /*
+  * Default values for user and/or group using reserved blocks
+  */
+@@ -741,16 +755,6 @@ struct ext2_dir_entry_2 {
+ #define EXT2_FT_MAX		8
+ 
+ /*
+- * EXT2_DIR_PAD defines the directory entries boundaries
+- *
+- * NOTE: It must be a multiple of 4
+- */
+-#define EXT2_DIR_PAD			4
+-#define EXT2_DIR_ROUND			(EXT2_DIR_PAD - 1)
+-#define EXT2_DIR_REC_LEN(name_len)	(((name_len) + 8 + EXT2_DIR_ROUND) & \
+-					 ~EXT2_DIR_ROUND)
+-
+-/*
+  * This structure will be used for multiple mount protection. It will be
+  * written into the block number saved in the s_mmp_block field in the
+  * superblock. Programs that check MMP should assume that if SEQ_FSCK
+@@ -783,4 +787,7 @@ struct mmp_struct {
+  */
+ #define EXT2_MMP_MIN_CHECK_INTERVAL     5
+ 
++int ext2_get_dirent_dirdata_size(struct ext2_dir_entry_2 *de, char dirdata_flags);
++int ext2_get_dirent_size(struct ext2_dir_entry_2 *de);
++
+ #endif	/* _LINUX_EXT2_FS_H */
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
+@@ -554,7 +554,8 @@ typedef struct ext2_icount *ext2_icount_
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+ 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+ 					 EXT4_FEATURE_INCOMPAT_MMP|\
+-					 EXT4_FEATURE_INCOMPAT_EA_INODE)
++					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
++ 					 EXT4_FEATURE_INCOMPAT_DIRDATA)
+ #else
+ #define EXT2_LIB_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE|\
+ 					 EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|\
+@@ -563,7 +564,8 @@ typedef struct ext2_icount *ext2_icount_
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+ 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+ 					 EXT4_FEATURE_INCOMPAT_MMP|\
+-					 EXT4_FEATURE_INCOMPAT_EA_INODE)
++					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
++ 					 EXT4_FEATURE_INCOMPAT_DIRDATA)
+ #endif
+ #define EXT2_LIB_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER|\
+ 					 EXT4_FEATURE_RO_COMPAT_HUGE_FILE|\
+@@ -1431,6 +1433,24 @@ _INLINE_ unsigned int ext2fs_div_ceil(un
+ 		return 0;
+ 	return ((a - 1) / b) + 1;
+ }
++
++_INLINE_ struct ext2_dx_root_info* get_ext2_dx_root_info(ext2_filsys fs, char *buf)
++{
++        struct ext2_dir_entry_2 * de = (struct ext2_dir_entry_2 *) buf;
++
++        if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA))
++                return (struct ext2_dx_root_info *)(buf +
++			 __EXT2_DIR_REC_LEN(1) +__EXT2_DIR_REC_LEN(2));
++
++        /* get dotdot first */
++        de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
++
++        /* dx root info is after dotdot entry */
++        de = (struct ext2_dir_entry_2 *)((char *)de + EXT2_DIR_REC_LEN(de));
++
++        return (struct ext2_dx_root_info*) de;
++}
++
+ #undef _INLINE_
+ #endif
+ 
+Index: e2fsprogs-1.41.12/misc/mke2fs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/mke2fs.c
++++ e2fsprogs-1.41.12/misc/mke2fs.c
+@@ -849,7 +849,8 @@ static __u32 ok_features[3] = {
+ 		EXT2_FEATURE_INCOMPAT_META_BG|
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG|
+ 		EXT4_FEATURE_INCOMPAT_EA_INODE|
+-		EXT4_FEATURE_INCOMPAT_MMP,
++		EXT4_FEATURE_INCOMPAT_MMP|
++		EXT4_FEATURE_INCOMPAT_DIRDATA,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE|
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+Index: e2fsprogs-1.41.12/misc/tune2fs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/tune2fs.c
++++ e2fsprogs-1.41.12/misc/tune2fs.c
+@@ -126,7 +126,8 @@ static __u32 ok_features[3] = {
+ 		EXT3_FEATURE_INCOMPAT_EXTENTS |
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG |
+ 		EXT4_FEATURE_INCOMPAT_EA_INODE|
+-		EXT4_FEATURE_INCOMPAT_MMP,
++		EXT4_FEATURE_INCOMPAT_MMP|
++		EXT4_FEATURE_INCOMPAT_DIRDATA,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+@@ -145,7 +146,8 @@ static __u32 clear_ok_features[3] = {
+ 	EXT2_FEATURE_INCOMPAT_FILETYPE |
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG |
+ 		EXT4_FEATURE_INCOMPAT_EA_INODE|
+-		EXT4_FEATURE_INCOMPAT_MMP,
++		EXT4_FEATURE_INCOMPAT_MMP|
++		EXT4_FEATURE_INCOMPAT_DIRDATA,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+Index: e2fsprogs-1.41.12/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass1.c
++++ e2fsprogs-1.41.12/e2fsck/pass1.c
+@@ -2026,7 +2026,7 @@ static int handle_htree(e2fsck_t ctx, st
+ 	}
+ 
+ 	/* XXX should check that beginning matches a directory */
+-	root = (struct ext2_dx_root_info *) (block_buf + 24);
++	root = get_ext2_dx_root_info(fs, block_buf);
+ 
+ 	if ((root->reserved_zero || root->info_length < 8) &&
+ 	    fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
+Index: e2fsprogs-1.41.12/e2fsck/pass2.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass2.c
++++ e2fsprogs-1.41.12/e2fsck/pass2.c
+@@ -329,13 +329,82 @@ static EXT2_QSORT_TYPE special_dir_block
+ 	return (int) (db_a->blockcnt - db_b->blockcnt);
+ }
+ 
++void ext2_fix_dirent_dirdata(struct ext2_dir_entry_2 *de)
++{
++	int i = 0, dirdatalen, rlen;
++	__u8 flags = 0, new_flag = 0;
++	__u8 de_flags = de->file_type & ~EXT2_FT_MASK;
++
++	while (i < 4) {
++
++		flags = new_flag | (1 << i) << 4;
++
++		if ((de_flags & flags) == flags) {
++
++			dirdatalen = ext2_get_dirent_dirdata_size(de, flags);
++			rlen = __EXT2_DIR_REC_LEN(de->name_len + dirdatalen);
++
++			if (rlen > de->rec_len)
++				break;
++
++			new_flag |= flags;
++		}
++		i++;
++	}
++
++	de->file_type = (de->file_type & EXT2_FT_MASK) | new_flag;
++}
++
++
++/*
++ * check for dirent data in ext3 dirent.
++ * return 0 if dirent data is ok.
++ * return 1 if dirent data does not exist.
++ * return 2 if dirent was modified due to error.
++ */
++int e2fsck_check_dirent_data(e2fsck_t ctx, struct ext2_dir_entry_2 *de,
++			     unsigned int offset, struct problem_context *pctx)
++{
++	if (!(ctx->fs->super->s_feature_incompat &
++			EXT4_FEATURE_INCOMPAT_DIRDATA)) {
++		if (de->file_type & ~EXT2_FT_MASK) {
++			/* clear dirent extra data flags. */
++			if (fix_problem(ctx, PR_2_CLEAR_DIRDATA, pctx)) {
++				de->file_type &= EXT2_FT_MASK;
++				return 2;
++			}
++		}
++		return 1;
++	}
++	if (de->file_type & ~EXT2_FT_MASK) {
+ 
++		if (de->rec_len >= EXT2_DIR_REC_LEN(de) ||
++		   (de->rec_len + offset == EXT2_BLOCK_SIZE(ctx->fs->super))) {
++			if (ext2_get_dirent_dirdata_size(de, EXT2_DIRENT_LUFID) ==
++			    EXT2_DIRENT_LUFID_SIZE)
++				return 0;
++		}
++		/* just clear dirent data flags for now, we should fix FID data
++		 * in lustre specific pass.
++		 */
++		if (fix_problem(ctx, PR_2_CLEAR_DIRDATA, pctx)) {
++			ext2_fix_dirent_dirdata(de);
++			if (ext2_get_dirent_dirdata_size(de, EXT2_DIRENT_LUFID) !=
++			    EXT2_DIRENT_LUFID_SIZE) {
++				de->file_type &= ~EXT2_DIRENT_LUFID;
++			}
++
++			return 2;
++		}
++	}
++	return 1;
++}
+ /*
+  * Make sure the first entry in the directory is '.', and that the
+  * directory entry is sane.
+  */
+ static int check_dot(e2fsck_t ctx,
+-		     struct ext2_dir_entry *dirent,
++		     struct ext2_dir_entry *dirent, unsigned int offset,
+ 		     ext2_ino_t ino, struct problem_context *pctx)
+ {
+ 	struct ext2_dir_entry *nextdir;
+@@ -343,6 +412,7 @@ static int check_dot(e2fsck_t ctx,
+ 	int	status = 0;
+ 	int	created = 0;
+ 	int	problem = 0;
++	int     dir_data_error;
+ 
+ 	if (!dirent->inode)
+ 		problem = PR_2_MISSING_DOT;
+@@ -352,10 +422,14 @@ static int check_dot(e2fsck_t ctx,
+ 	else if (dirent->name[1] != '\0')
+ 		problem = PR_2_DOT_NULL_TERM;
+ 
++        dir_data_error = e2fsck_check_dirent_data(ctx,
++                               (struct ext2_dir_entry_2 *)dirent,
++                               offset, pctx);
++
+ 	(void) ext2fs_get_rec_len(ctx->fs, dirent, &rec_len);
+ 	if (problem) {
+ 		if (fix_problem(ctx, problem, pctx)) {
+-			if (rec_len < 12)
++			if (rec_len < 12 && dir_data_error)
+ 				rec_len = dirent->rec_len = 12;
+ 			dirent->inode = ino;
+ 			dirent->name_len = 1;
+@@ -371,7 +445,7 @@ static int check_dot(e2fsck_t ctx,
+ 			status = 1;
+ 		}
+ 	}
+-	if (rec_len > 12) {
++	if (rec_len > 12 && dir_data_error) {
+ 		new_len = rec_len - 12;
+ 		if (new_len > 12) {
+ 			if (created ||
+@@ -396,10 +470,11 @@ static int check_dot(e2fsck_t ctx,
+  * here; this gets done in pass 3.
+  */
+ static int check_dotdot(e2fsck_t ctx,
+-			struct ext2_dir_entry *dirent,
++			struct ext2_dir_entry *dirent, unsigned int offset,
+ 			ext2_ino_t ino, struct problem_context *pctx)
+ {
+ 	int	rec_len, problem = 0;
++	int     dir_data_error;
+ 
+ 	if (!dirent->inode)
+ 		problem = PR_2_MISSING_DOT_DOT;
+@@ -410,10 +485,14 @@ static int check_dotdot(e2fsck_t ctx,
+ 	else if (dirent->name[2] != '\0')
+ 		problem = PR_2_DOT_DOT_NULL_TERM;
+ 
++        dir_data_error = e2fsck_check_dirent_data(ctx,
++                                (struct ext2_dir_entry_2 *)dirent,
++                                offset, pctx);
++
+ 	(void) ext2fs_get_rec_len(ctx->fs, dirent, &rec_len);
+ 	if (problem) {
+ 		if (fix_problem(ctx, problem, pctx)) {
+-			if (rec_len < 12)
++			if (rec_len < 12 && dir_data_error)
+ 				dirent->rec_len = 12;
+ 			/*
+ 			 * Note: we don't have the parent inode just
+@@ -475,6 +554,12 @@ static _INLINE_ int check_filetype(e2fsc
+ 	int	should_be = EXT2_FT_UNKNOWN;
+ 	__u16	result;
+ 	struct ext2_inode	inode;
++	__u8    dirdata = 0;
++
++	if (ctx->fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA) {
++		dirdata = filetype & ~EXT2_FT_MASK;
++		filetype = filetype & EXT2_FT_MASK;
++	}
+ 
+ 	if (!(ctx->fs->super->s_feature_incompat &
+ 	      EXT2_FEATURE_INCOMPAT_FILETYPE)) {
+@@ -509,7 +594,7 @@ static _INLINE_ int check_filetype(e2fsc
+ 			pctx) == 0)
+ 		return 0;
+ 
+-	dirent->name_len = (dirent->name_len & 0xFF) | should_be << 8;
++	dirent->name_len = ((dirent->name_len & 0xFF) | (dirdata | should_be) << 8);
+ 	return 1;
+ }
+ 
+@@ -531,7 +616,7 @@ static void parse_int_node(ext2_filsys f
+ 	ext2_dirhash_t	hash = 0, prev_hash;
+ 
+ 	if (db->blockcnt == 0) {
+-		root = (struct ext2_dx_root_info *) (block_buf + 24);
++		root = get_ext2_dx_root_info(fs, block_buf);
+ 
+ #ifdef DX_DEBUG
+ 		printf("Root node dump:\n");
+@@ -542,7 +627,7 @@ static void parse_int_node(ext2_filsys f
+ 		printf("\t Flags: %d\n", root->unused_flags);
+ #endif
+ 
+-		ent = (struct ext2_dx_entry *) (block_buf + 24 + root->info_length);
++		ent = (struct ext2_dx_entry *) ((char *) root + root->info_length);
+ 	} else {
+ 		ent = (struct ext2_dx_entry *) (block_buf+8);
+ 	}
+@@ -806,7 +891,7 @@ static int check_dir_block(ext2_filsys f
+ 		(void) ext2fs_get_rec_len(fs, dirent, &rec_len);
+ 		limit = (struct ext2_dx_countlimit *) (buf+8);
+ 		if (db->blockcnt == 0) {
+-			root = (struct ext2_dx_root_info *) (buf + 24);
++			root = get_ext2_dx_root_info(fs, buf);
+ 			dx_db->type = DX_DIRBLOCK_ROOT;
+ 			dx_db->flags |= DX_FLAG_FIRST | DX_FLAG_LAST;
+ 			if ((root->reserved_zero ||
+@@ -863,10 +948,10 @@ out_htree:
+ 		}
+ 
+ 		if (dot_state == 0) {
+-			if (check_dot(ctx, dirent, ino, &cd->pctx))
++			if (check_dot(ctx, dirent, offset, ino, &cd->pctx))
+ 				dir_modified++;
+ 		} else if (dot_state == 1) {
+-			ret = check_dotdot(ctx, dirent, ino, &cd->pctx);
++			ret = check_dotdot(ctx, dirent, offset, ino, &cd->pctx);
+ 			if (ret < 0)
+ 				goto abort_free_dict;
+ 			if (ret)
+@@ -882,6 +967,11 @@ out_htree:
+ 		if (!dirent->inode)
+ 			goto next;
+ 
++		ret = e2fsck_check_dirent_data(ctx, (struct ext2_dir_entry_2 *)dirent,
++					 offset, &cd->pctx);
++		if (ret == 2)
++			dir_modified++;
++
+ 		/*
+ 		 * Make sure the inode listed is a legal one.
+ 		 */
+Index: e2fsprogs-1.41.12/e2fsck/pass3.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass3.c
++++ e2fsprogs-1.41.12/e2fsck/pass3.c
+@@ -606,6 +606,7 @@ static int fix_dotdot_proc(struct ext2_d
+ 	struct fix_dotdot_struct *fp = (struct fix_dotdot_struct *) priv_data;
+ 	errcode_t	retval;
+ 	struct problem_context pctx;
++	__u16 dirdata = 0;
+ 
+ 	if ((dirent->name_len & 0xFF) != 2)
+ 		return 0;
+@@ -625,6 +626,9 @@ static int fix_dotdot_proc(struct ext2_d
+ 		fix_problem(fp->ctx, PR_3_ADJUST_INODE, &pctx);
+ 	}
+ 	dirent->inode = fp->parent;
++
++	dirdata  = dirent->name_len & (~EXT2_FT_MASK << 8);
++
+ 	if (fp->ctx->fs->super->s_feature_incompat &
+ 	    EXT2_FEATURE_INCOMPAT_FILETYPE)
+ 		dirent->name_len = (dirent->name_len & 0xFF) |
+@@ -632,6 +636,9 @@ static int fix_dotdot_proc(struct ext2_d
+ 	else
+ 		dirent->name_len = dirent->name_len & 0xFF;
+ 
++	if (fp->ctx->fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA)
++		dirent->name_len |= dirdata;
++
+ 	fp->done++;
+ 	return DIRENT_ABORT | DIRENT_CHANGED;
+ }
+Index: e2fsprogs-1.41.12/e2fsck/problem.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.c
++++ e2fsprogs-1.41.12/e2fsck/problem.c
+@@ -1425,6 +1425,11 @@ static struct e2fsck_problem problem_tab
+ 	  N_("@i %i is badly corrupt (badness value = %N).  "),
+ 	  PROMPT_CLEAR, PR_PREEN_OK },
+ 
++        /* Directory dirdata flag set */
++        { PR_2_CLEAR_DIRDATA,
++          N_("@E dirdata length set incorrectly.\n"),
++          PROMPT_CLEAR, PR_PREEN_OK },
++
+ 	/* Pass 3 errors */
+ 
+ 	/* Pass 3: Checking directory connectivity */
+Index: e2fsprogs-1.41.12/e2fsck/problem.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.h
++++ e2fsprogs-1.41.12/e2fsck/problem.h
+@@ -855,6 +855,9 @@ struct problem_context {
+ /* Inode completely corrupt */
+ #define PR_2_INODE_TOOBAD		0x020049
+ 
++/* Directory dirdata flag set */
++#define PR_2_CLEAR_DIRDATA		0x02f000
++
+ /*
+  * Pass 3 errors
+  */
+Index: e2fsprogs-1.41.12/e2fsck/rehash.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/rehash.c
++++ e2fsprogs-1.41.12/e2fsck/rehash.c
+@@ -148,7 +148,7 @@ static int fill_dir_block(ext2_filsys fs
+ 		}
+ 		ent = fd->harray + fd->num_array++;
+ 		ent->dir = dirent;
+-		fd->dir_size += EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
++		fd->dir_size += __EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
+ 		ent->ino = dirent->inode;
+ 		if (fd->compress)
+ 			ent->hash = ent->minor_hash = 0;
+@@ -440,7 +440,7 @@ static errcode_t copy_dir_entries(e2fsck
+ 		ent = fd->harray + i;
+ 		if (ent->dir->inode == 0)
+ 			continue;
+-		rec_len = EXT2_DIR_REC_LEN(ent->dir->name_len & 0xFF);
++		rec_len = __EXT2_DIR_REC_LEN(ent->dir->name_len & 0xFF);
+ 		if (rec_len > left) {
+ 			if (left) {
+ 				left += prev_rec_len;
+Index: e2fsprogs-1.41.12/lib/ext2fs/link.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/link.c
++++ e2fsprogs-1.41.12/lib/ext2fs/link.c
+@@ -41,7 +41,7 @@ static int link_proc(struct ext2_dir_ent
+ 	unsigned int rec_len, min_rec_len, curr_rec_len;
+ 	int ret = 0;
+ 
+-	rec_len = EXT2_DIR_REC_LEN(ls->namelen);
++	rec_len = __EXT2_DIR_REC_LEN(ls->namelen);
+ 
+ 	ls->err = ext2fs_get_rec_len(ls->fs, dirent, &curr_rec_len);
+ 	if (ls->err)
+@@ -68,7 +68,7 @@ static int link_proc(struct ext2_dir_ent
+ 	 * truncate it and return.
+ 	 */
+ 	if (dirent->inode) {
+-		min_rec_len = EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
++		min_rec_len = __EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
+ 		if (curr_rec_len < (min_rec_len + rec_len))
+ 			return ret;
+ 		rec_len = curr_rec_len - min_rec_len;
+Index: e2fsprogs-1.41.12/lib/ext2fs/newdir.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/newdir.c
++++ e2fsprogs-1.41.12/lib/ext2fs/newdir.c
+@@ -56,8 +56,8 @@ errcode_t ext2fs_new_dir_block(ext2_fils
+ 		dir->inode = dir_ino;
+ 		dir->name_len = 1 | filetype;
+ 		dir->name[0] = '.';
+-		rec_len = fs->blocksize - EXT2_DIR_REC_LEN(1);
+-		dir->rec_len = EXT2_DIR_REC_LEN(1);
++		rec_len = fs->blocksize - __EXT2_DIR_REC_LEN(1);
++		dir->rec_len = __EXT2_DIR_REC_LEN(1);
+ 
+ 		/*
+ 		 * Set up entry for '..'
+Index: e2fsprogs-1.41.12/lib/ext2fs/dirblock.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/dirblock.c
++++ e2fsprogs-1.41.12/lib/ext2fs/dirblock.c
+@@ -19,6 +19,39 @@
+ #include "ext2_fs.h"
+ #include "ext2fs.h"
+ 
++/*
++ * Compute the total directory entry data length.
++ * This includes the filename and an implicit NUL terminator (always present),
++ * and optional extensions.  Each extension has a bit set in the high 4 bits of
++ * de->file_type, and the extension length is the first byte in each entry.
++ */
++int ext2_get_dirent_size(struct ext2_dir_entry_2 *de)
++{
++	return ext2_get_dirent_dirdata_size(de, ~EXT2_FT_MASK);
++}
++
++int ext2_get_dirent_dirdata_size(struct ext2_dir_entry_2 *de, char dirdata_flags)
++{
++        char *len = de->name + de->name_len + 1 /* NUL terminator */;
++        int dlen = 0;
++        __u8 extra_data_flags = (de->file_type & ~EXT2_FT_MASK) >> 4;
++
++        dirdata_flags >>= 4;
++        while ((extra_data_flags & dirdata_flags) != 0) {
++                if (extra_data_flags & 1) {
++                        if (dirdata_flags & 1)
++                                dlen += *len;
++
++                        len += *len;
++                }
++                extra_data_flags >>= 1;
++                dirdata_flags >>= 1;
++        }
++
++        /* add NUL terminator byte to dirdata length */
++        return dlen + (dlen != 0);
++}
++
+ errcode_t ext2fs_read_dir_block2(ext2_filsys fs, blk_t block,
+ 				 void *buf, int flags EXT2FS_ATTR((unused)))
+ {

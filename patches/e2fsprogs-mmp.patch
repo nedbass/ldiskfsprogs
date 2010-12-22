@@ -1,0 +1,1821 @@
+Add multi-mount protection support to libext2fs (INCOMPAT_MMP feature).
+
+This allows mke2fs, e2fsck, and others to detect if the filesystem is
+mounted on a remote node (on SAN disks) and avoid corrupting the
+filesystem.  For e2fsprogs this only means that it check the MMP block
+to see if the filesystem is in use, and mark the filesystem busy while
+e2fsck is running on the system.
+
+There is no requirement that e2fsck updates the MMP block in any regular
+interval, but e2fsck does this occasionally to provide additional
+information to the sysadmin in case of conflict.
+
+Signed-off-by: Kalpak Shah <kalpak@clusterfs.com>
+Signed-off-by: Andreas Dilger <adilger@clusterfs.com>
+
+Index: e2fsprogs-1.41.12/lib/e2p/feature.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/e2p/feature.c
++++ e2fsprogs-1.41.12/lib/e2p/feature.c
+@@ -73,7 +73,9 @@ static struct feature feature_list[] = {
+ 	{	E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_64BIT,
+ 			"64bit" },
+ 	{       E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_FLEX_BG,
+-                        "flex_bg"},
++			"flex_bg"},
++	{       E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP,
++			"mmp" },
+ 	{	0, 0, 0 },
+ };
+ 
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2_fs.h
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
+@@ -588,7 +588,7 @@ struct ext2_super_block {
+ 	__u16	s_want_extra_isize; 	/* New inodes should reserve # bytes */
+ 	__u32	s_flags;		/* Miscellaneous flags */
+ 	__u16   s_raid_stride;		/* RAID stride */
+-	__u16   s_mmp_interval;         /* # seconds to wait in MMP checking */
++	__u16   s_mmp_update_interval;  /* # seconds to wait in MMP checking */
+ 	__u64   s_mmp_block;            /* Block for multi-mount protection */
+ 	__u32   s_raid_stripe_width;    /* blocks on all data disks (N*stride)*/
+ 	__u8	s_log_groups_per_flex;	/* FLEX_BG group size */
+@@ -671,7 +671,8 @@ struct ext2_super_block {
+ 
+ 
+ #define EXT2_FEATURE_COMPAT_SUPP	0
+-#define EXT2_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE)
++#define EXT2_FEATURE_INCOMPAT_SUPP    (EXT2_FEATURE_INCOMPAT_FILETYPE| \
++				       EXT4_FEATURE_INCOMPAT_MMP)
+ #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
+ 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
+ 					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
+@@ -751,26 +752,34 @@ struct ext2_dir_entry_2 {
+ /*
+  * This structure will be used for multiple mount protection. It will be
+  * written into the block number saved in the s_mmp_block field in the
+- * superblock.
+- */
+-#define	EXT2_MMP_MAGIC    0x004D4D50 /* ASCII for MMP */
+-#define	EXT2_MMP_CLEAN    0xFF4D4D50 /* Value of mmp_seq for clean unmount */
+-#define	EXT2_MMP_FSCK_ON  0xE24D4D50 /* Value of mmp_seq when being fscked */
++ * superblock. Programs that check MMP should assume that if SEQ_FSCK
++ * (or any unknown code above SEQ_MAX) is present then it is NOT safe
++ * to use the filesystem, regardless of how old the timestamp is.
++ */
++#define EXT2_MMP_MAGIC     0x004D4D50U /* ASCII for MMP */
++#define EXT2_MMP_SEQ_CLEAN 0xFF4D4D50U /* mmp_seq value for clean unmount */
++#define EXT2_MMP_SEQ_FSCK  0xE24D4D50U /* mmp_seq value when being fscked */
++#define EXT2_MMP_SEQ_MAX   0xE24D4D4FU /* maximum valid mmp_seq value */
+ 
+ struct mmp_struct {
+-	__u32	mmp_magic;
+-	__u32	mmp_seq;
+-	__u64	mmp_time;
+-	char	mmp_nodename[64];
+-	char	mmp_bdevname[32];
+-	__u16	mmp_interval;
++	__u32	mmp_magic;		/* Magic number for MMP */
++	__u32	mmp_seq;		/* Sequence no. updated periodically */
++	__u64	mmp_time;		/* Time last updated */
++	char	mmp_nodename[64];	/* Node which last updated MMP block */
++	char	mmp_bdevname[32];	/* Bdev which last updated MMP block */
++	__u16	mmp_check_interval;	/* Changed mmp_check_interval */
+ 	__u16	mmp_pad1;
+-	__u32	mmp_pad2;
++	__u32	mmp_pad2[227];
+ };
+ 
+ /*
+- * Interval in number of seconds to update the MMP sequence number.
++ * Default interval in seconds to update the MMP sequence number.
++ */
++#define EXT2_MMP_UPDATE_INTERVAL	1
++
++/*
++ * Minimum interval for MMP checking in seconds.
+  */
+-#define EXT2_MMP_DEF_INTERVAL	5
++#define EXT2_MMP_MIN_CHECK_INTERVAL     5
+ 
+ #endif	/* _LINUX_EXT2_FS_H */
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
+@@ -172,6 +172,8 @@ typedef struct ext2_file *ext2_file_t;
+ #define EXT2_FLAG_EXCLUSIVE		0x4000
+ #define EXT2_FLAG_SOFTSUPP_FEATURES	0x8000
+ #define EXT2_FLAG_NOFREE_ON_ERROR	0x10000
++#define EXT2_FLAG_SKIP_MMP		0x20000
++
+ 
+ /*
+  * Special flag in the ext2 inode i_flag field that means that this is
+@@ -186,6 +188,15 @@ typedef struct ext2_file *ext2_file_t;
+ #define EXT2_MKJOURNAL_V1_SUPER	0x0000001 /* create V1 superblock (deprecated) */
+ #define EXT2_MKJOURNAL_LAZYINIT	0x0000002 /* don't zero journal inode before use*/
+ 
++/*
++ * The timestamp in the MMP structure will be updated by e2fsck at some
++ * arbitary intervals (start of passes, after every EXT2_MMP_INODE_INTERVAL
++ * inodes in pass1 and pass1b).  There is no guarantee that e2fsck is updating
++ * the MMP block in a timely manner, and the updates it does are purely for
++ * the convenience of the sysadmin and not for automatic validation.
++ */
++#define EXT2_MMP_INODE_INTERVAL 20000
++
+ struct struct_ext2_filsys {
+ 	errcode_t			magic;
+ 	io_channel			io;
+@@ -231,6 +242,19 @@ struct struct_ext2_filsys {
+ 	io_channel			image_io;
+ 
+ 	/*
++	 * Buffers for Multiple mount protection(MMP) block.
++	 */
++	void *mmp_buf;
++	void *mmp_unaligned_buf;
++	void *mmp_cmp;
++	int mmp_fd;
++
++	/*
++	 * Time at which e2fsck last updated the MMP block.
++	 */
++	long mmp_last_written;
++
++	/*
+ 	 * More callback functions
+ 	 */
+ 	errcode_t (*get_alloc_block)(ext2_filsys fs, blk64_t goal,
+@@ -528,14 +552,16 @@ typedef struct ext2_icount *ext2_icount_
+ 					 EXT2_FEATURE_INCOMPAT_META_BG|\
+ 					 EXT3_FEATURE_INCOMPAT_RECOVER|\
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+-					 EXT4_FEATURE_INCOMPAT_FLEX_BG)
++					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
++					 EXT4_FEATURE_INCOMPAT_MMP)
+ #else
+ #define EXT2_LIB_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE|\
+ 					 EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|\
+ 					 EXT2_FEATURE_INCOMPAT_META_BG|\
+ 					 EXT3_FEATURE_INCOMPAT_RECOVER|\
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+-					 EXT4_FEATURE_INCOMPAT_FLEX_BG)
++					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
++					 EXT4_FEATURE_INCOMPAT_MMP)
+ #endif
+ #define EXT2_LIB_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER|\
+ 					 EXT4_FEATURE_RO_COMPAT_HUGE_FILE|\
+@@ -1113,6 +1139,16 @@ errcode_t ext2fs_link(ext2_filsys fs, ex
+ errcode_t ext2fs_unlink(ext2_filsys fs, ext2_ino_t dir, const char *name,
+ 			ext2_ino_t ino, int flags);
+ 
++/* mmp.c */
++errcode_t ext2fs_mmp_read(ext2_filsys fs, blk_t mmp_blk, void *buf);
++errcode_t ext2fs_mmp_write(ext2_filsys fs, blk_t mmp_blk, void *buf);
++errcode_t ext2fs_mmp_clear(ext2_filsys fs);
++errcode_t ext2fs_mmp_init(ext2_filsys fs);
++errcode_t ext2fs_mmp_start(ext2_filsys fs);
++errcode_t ext2fs_mmp_update(ext2_filsys fs);
++errcode_t ext2fs_mmp_stop(ext2_filsys fs);
++unsigned ext2fs_mmp_new_seq();
++
+ /* read_bb.c */
+ extern errcode_t ext2fs_read_bb_inode(ext2_filsys fs,
+ 				      ext2_badblocks_list *bb_list);
+@@ -1150,6 +1186,7 @@ extern void ext2fs_swap_inode_full(ext2_
+ 				   int bufsize);
+ extern void ext2fs_swap_inode(ext2_filsys fs,struct ext2_inode *t,
+ 			      struct ext2_inode *f, int hostorder);
++extern void ext2fs_swap_mmp(struct mmp_struct *mmp);
+ 
+ /* valid_blk.c */
+ extern int ext2fs_inode_has_valid_blocks(struct ext2_inode *inode);
+Index: e2fsprogs-1.41.12/misc/tune2fs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/tune2fs.c
++++ e2fsprogs-1.41.12/misc/tune2fs.c
+@@ -64,8 +64,9 @@ char *device_name;
+ char *new_label, *new_last_mounted, *new_UUID;
+ char *io_options;
+ static int c_flag, C_flag, e_flag, f_flag, g_flag, i_flag, l_flag, L_flag;
+-static int m_flag, M_flag, r_flag, s_flag = -1, u_flag, U_flag, T_flag;
++static int m_flag, M_flag, r_flag, s_flag = -1, u_flag, U_flag, T_flag, p_flag;
+ static int I_flag;
++static int clear_mmp;
+ static time_t last_check_time;
+ static int print_label;
+ static int max_mount_count, mount_count, mount_flags;
+@@ -74,6 +75,7 @@ static double reserved_ratio;
+ static unsigned long resgid, resuid;
+ static unsigned short errors;
+ static int open_flag;
++static unsigned int mmp_update_interval;
+ static char *features_cmd;
+ static char *mntopts_cmd;
+ static int stride, stripe_width;
+@@ -106,7 +108,7 @@ static void usage(void)
+ 		  "[-g group]\n"
+ 		  "\t[-i interval[d|m|w]] [-j] [-J journal_options] [-l]\n"
+ 		  "\t[-m reserved_blocks_percent] "
+-		  "[-o [^]mount_options[,...]] \n"
++		  "[-o [^]mount_options[,...]] [-p mmp_update_interval]\n"
+ 		  "\t[-r reserved_blocks_count] [-u user] [-C mount_count] "
+ 		  "[-L volume_label]\n"
+ 		  "\t[-M last_mounted_dir] [-O [^]feature[,...]]\n"
+@@ -122,7 +124,8 @@ static __u32 ok_features[3] = {
+ 	/* Incompat */
+ 	EXT2_FEATURE_INCOMPAT_FILETYPE |
+ 		EXT3_FEATURE_INCOMPAT_EXTENTS |
+-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
++		EXT4_FEATURE_INCOMPAT_FLEX_BG |
++		EXT4_FEATURE_INCOMPAT_MMP,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+@@ -139,7 +142,8 @@ static __u32 clear_ok_features[3] = {
+ 		EXT2_FEATURE_COMPAT_DIR_INDEX,
+ 	/* Incompat */
+ 	EXT2_FEATURE_INCOMPAT_FILETYPE |
+-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
++		EXT4_FEATURE_INCOMPAT_FLEX_BG |
++		EXT4_FEATURE_INCOMPAT_MMP,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+@@ -151,7 +155,7 @@ static __u32 clear_ok_features[3] = {
+ /*
+  * Remove an external journal from the filesystem
+  */
+-static void remove_journal_device(ext2_filsys fs)
++static int remove_journal_device(ext2_filsys fs)
+ {
+ 	char		*journal_path;
+ 	ext2_filsys	jfs;
+@@ -240,13 +244,15 @@ static void remove_journal_device(ext2_f
+ no_valid_journal:
+ 	if (commit_remove_journal == 0) {
+ 		fputs(_("Journal NOT removed\n"), stderr);
+-		exit(1);
++		return 1;
+ 	}
+ 	fs->super->s_journal_dev = 0;
+ 	uuid_clear(fs->super->s_journal_uuid);
+ 	ext2fs_mark_super_dirty(fs);
+ 	fputs(_("Journal removed\n"), stdout);
+ 	free(journal_path);
++
++	return 0;
+ }
+ 
+ /* Helper function for remove_journal_inode */
+@@ -269,7 +275,7 @@ static int release_blocks_proc(ext2_fils
+ /*
+  * Remove the journal inode from the filesystem
+  */
+-static void remove_journal_inode(ext2_filsys fs)
++static errcode_t remove_journal_inode(ext2_filsys fs)
+ {
+ 	struct ext2_inode	inode;
+ 	errcode_t		retval;
+@@ -279,14 +285,14 @@ static void remove_journal_inode(ext2_fi
+ 	if (retval) {
+ 		com_err(program_name, retval,
+ 			_("while reading journal inode"));
+-		exit(1);
++		return retval;
+ 	}
+ 	if (ino == EXT2_JOURNAL_INO) {
+ 		retval = ext2fs_read_bitmaps(fs);
+ 		if (retval) {
+ 			com_err(program_name, retval,
+ 				_("while reading bitmaps"));
+-			exit(1);
++			return retval;
+ 		}
+ 		retval = ext2fs_block_iterate(fs, ino,
+ 					      BLOCK_FLAG_READ_ONLY, NULL,
+@@ -294,7 +300,7 @@ static void remove_journal_inode(ext2_fi
+ 		if (retval) {
+ 			com_err(program_name, retval,
+ 				_("while clearing journal inode"));
+-			exit(1);
++			return retval;
+ 		}
+ 		memset(&inode, 0, sizeof(inode));
+ 		ext2fs_mark_bb_dirty(fs);
+@@ -305,25 +311,29 @@ static void remove_journal_inode(ext2_fi
+ 	if (retval) {
+ 		com_err(program_name, retval,
+ 			_("while writing journal inode"));
+-		exit(1);
++		return retval;
+ 	}
+ 	fs->super->s_journal_inum = 0;
+ 	ext2fs_mark_super_dirty(fs);
++
++	return 0;
+ }
+ 
+ /*
+  * Update the default mount options
+  */
+-static void update_mntopts(ext2_filsys fs, char *mntopts)
++static int update_mntopts(ext2_filsys fs, char *mntopts)
+ {
+ 	struct ext2_super_block *sb = fs->super;
+ 
+ 	if (e2p_edit_mntopts(mntopts, &sb->s_default_mount_opts, ~0)) {
+ 		fprintf(stderr, _("Invalid mount option set: %s\n"),
+ 			mntopts);
+-		exit(1);
++		return 1;
+ 	}
+ 	ext2fs_mark_super_dirty(fs);
++
++	return 0;
+ }
+ 
+ static void request_fsck_afterwards(ext2_filsys fs)
+@@ -341,7 +351,7 @@ static void request_fsck_afterwards(ext2
+ /*
+  * Update the feature set as provided by the user.
+  */
+-static void update_feature_set(ext2_filsys fs, char *features)
++static int update_feature_set(ext2_filsys fs, char *features)
+ {
+ 	struct ext2_super_block *sb = fs->super;
+ 	struct ext2_group_desc *gd;
+@@ -378,7 +388,7 @@ static void update_feature_set(ext2_fils
+ 			fprintf(stderr, _("Setting filesystem feature '%s' "
+ 					  "not supported.\n"),
+ 				e2p_feature2string(type_err, mask_err));
+-		exit(1);
++		return 1;
+ 	}
+ 
+ 	if (FEATURE_OFF(E2P_FEATURE_COMPAT, EXT3_FEATURE_COMPAT_HAS_JOURNAL)) {
+@@ -388,22 +398,89 @@ static void update_feature_set(ext2_fils
+ 				"cleared when the filesystem is\n"
+ 				"unmounted or mounted "
+ 				"read-only.\n"), stderr);
+-			exit(1);
++			return 1;
+ 		}
+ 		if (sb->s_feature_incompat &
+ 		    EXT3_FEATURE_INCOMPAT_RECOVER) {
+ 			fputs(_("The needs_recovery flag is set.  "
+ 				"Please run e2fsck before clearing\n"
+ 				"the has_journal flag.\n"), stderr);
+-			exit(1);
++			return 1;
+ 		}
+ 		if (sb->s_journal_inum) {
+-			remove_journal_inode(fs);
++			if (remove_journal_inode(fs))
++				return 1;
+ 		}
+ 		if (sb->s_journal_dev) {
+-			remove_journal_device(fs);
++			if (remove_journal_device(fs))
++				return 1;
+ 		}
+ 	}
++	if (FEATURE_ON(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP)) {
++		int error;
++
++		if ((mount_flags & EXT2_MF_MOUNTED) ||
++		    (mount_flags & EXT2_MF_READONLY)) {
++			fputs(_("The multiple mount protection feature can't \n"
++				"be set if the filesystem is mounted or \n"
++				"read-only.\n"), stderr);
++			return 1;
++		}
++
++		error = ext2fs_mmp_init(fs);
++		if (error) {
++			fputs(_("\nError while enabling multiple mount "
++				"protection feature."), stderr);
++			return 1;
++		}
++
++		/*
++		 * We want to update group desc with the new free blocks count
++		 */
++		fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
++
++		printf(_("Multiple mount protection has been enabled "
++			 "with update interval %ds.\n"),
++		       sb->s_mmp_update_interval);
++	}
++
++	if (FEATURE_OFF(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP)) {
++		int error;
++
++		if (mount_flags & EXT2_MF_READONLY) {
++			fputs(_("The multiple mount protection feature cannot\n"
++				"be disabled if the filesystem is readonly.\n"),
++				stderr);
++			return 1;
++		}
++
++		error = ext2fs_read_bitmaps(fs);
++		if (error) {
++			fputs(_("Error while reading bitmaps\n"), stderr);
++			return 1;
++		}
++
++		error = ext2fs_mmp_read(fs, sb->s_mmp_block, NULL);
++		if (error) {
++			struct mmp_struct *mmp_cmp = fs->mmp_cmp;
++
++			if (error == EXT2_ET_MMP_MAGIC_INVALID)
++				printf(_("Magic number in MMP block does not "
++					 "match. expected: %x, actual: %x\n"),
++					 EXT2_MMP_MAGIC, mmp_cmp->mmp_magic);
++			else
++				com_err (program_name, error,
++					 _("while reading MMP block."));
++			goto mmp_error;
++		}
++
++		/* We need to force out the group descriptors as well */
++		fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
++		ext2fs_block_alloc_stats(fs, sb->s_mmp_block, -1);
++mmp_error:
++		sb->s_mmp_block = 0;
++		sb->s_mmp_update_interval = 0;
++	}
+ 
+ 	if (FEATURE_ON(E2P_FEATURE_COMPAT, EXT3_FEATURE_COMPAT_HAS_JOURNAL)) {
+ 		/*
+@@ -495,12 +572,14 @@ static void update_feature_set(ext2_fils
+ 	    (old_features[E2P_FEATURE_INCOMPAT] != sb->s_feature_incompat) ||
+ 	    (old_features[E2P_FEATURE_RO_INCOMPAT] != sb->s_feature_ro_compat))
+ 		ext2fs_mark_super_dirty(fs);
++
++	return 0;
+ }
+ 
+ /*
+  * Add a journal to the filesystem.
+  */
+-static void add_journal(ext2_filsys fs)
++static int add_journal(ext2_filsys fs)
+ {
+ 	unsigned long journal_blocks;
+ 	errcode_t	retval;
+@@ -555,7 +634,7 @@ static void add_journal(ext2_filsys fs)
+ 			fprintf(stderr, "\n");
+ 			com_err(program_name, retval,
+ 				_("\n\twhile trying to create journal file"));
+-			exit(1);
++			return retval;
+ 		} else
+ 			fputs(_("done\n"), stdout);
+ 		/*
+@@ -566,11 +645,11 @@ static void add_journal(ext2_filsys fs)
+ 			fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
+ 	}
+ 	print_check_message(fs);
+-	return;
++	return 0;
+ 
+ err:
+ 	free(journal_device);
+-	exit(1);
++	return 1;
+ }
+ 
+ 
+@@ -638,7 +717,7 @@ static void parse_tune2fs_options(int ar
+ 	open_flag = 0;
+ 
+ 	printf("tune2fs %s (%s)\n", E2FSPROGS_VERSION, E2FSPROGS_DATE);
+-	while ((c = getopt(argc, argv, "c:e:fg:i:jlm:o:r:s:u:C:E:I:J:L:M:O:T:U:")) != EOF)
++	while ((c = getopt(argc, argv, "c:e:fg:i:jlm:o:p:r:s:u:C:E:I:J:L:M:O:T:U:")) != EOF)
+ 		switch (c) {
+ 		case 'c':
+ 			max_mount_count = strtol(optarg, &tmp, 0);
+@@ -793,6 +872,25 @@ static void parse_tune2fs_options(int ar
+ 			features_cmd = optarg;
+ 			open_flag = EXT2_FLAG_RW;
+ 			break;
++		case 'p':
++			mmp_update_interval = strtol(optarg, &tmp, 0);
++			if (*tmp && mmp_update_interval < 0) {
++				com_err(program_name, 0,
++					_("invalid mmp update interval"));
++				usage();
++			}
++			if (mmp_update_interval == 0)
++				mmp_update_interval = EXT2_MMP_UPDATE_INTERVAL;
++			if (mmp_update_interval > EXT2_MMP_UPDATE_INTERVAL) {
++				com_err(program_name, 0,
++					_("MMP update interval of %s seconds "
++					  "may be dangerous under high load.  "
++					  "Consider decreasing it."),
++					optarg);
++			}
++			p_flag = 1;
++			open_flag = EXT2_FLAG_RW;
++			break;
+ 		case 'r':
+ 			reserved_blocks = strtoul(optarg, &tmp, 0);
+ 			if (*tmp) {
+@@ -897,7 +995,7 @@ void do_findfs(int argc, char **argv)
+ }
+ #endif
+ 
+-static void parse_extended_opts(ext2_filsys fs, const char *opts)
++static int parse_extended_opts(ext2_filsys fs, const char *opts)
+ {
+ 	char	*buf, *token, *next, *p, *arg;
+ 	int	len, hash_alg;
+@@ -908,7 +1006,7 @@ static void parse_extended_opts(ext2_fil
+ 	if (!buf) {
+ 		fprintf(stderr,
+ 			_("Couldn't allocate memory to parse options!\n"));
+-		exit(1);
++		return 1;
+ 	}
+ 	strcpy(buf, opts);
+ 	for (token = buf; token && *token; token = next) {
+@@ -931,6 +1029,9 @@ static void parse_extended_opts(ext2_fil
+ 			fs->super->s_flags &= ~EXT2_FLAGS_TEST_FILESYS;
+ 			printf("Clearing test filesystem flag\n");
+ 			ext2fs_mark_super_dirty(fs);
++		} else if (strcmp(token, "clear-mmp") == 0 ||
++		           strcmp(token, "clear_mmp") == 0) {
++			clear_mmp = 1;
+ 		} else if (strcmp(token, "stride") == 0) {
+ 			if (!arg) {
+ 				r_usage++;
+@@ -988,15 +1089,18 @@ static void parse_extended_opts(ext2_fil
+ 			"and may take an argument which\n"
+ 			"\tis set off by an equals ('=') sign.\n\n"
+ 			"Valid extended options are:\n"
++			"\tclear-mmp\n"
+ 			"\tstride=<RAID per-disk chunk size in blocks>\n"
+ 			"\tstripe_width=<RAID stride*data disks in blocks>\n"
+ 			"\thash_alg=<hash algorithm>\n"
+ 			"\ttest_fs\n"
+ 			"\t^test_fs\n"));
+ 		free(buf);
+-		exit(1);
++		return 1;
+ 	}
+ 	free(buf);
++
++	return 0;
+ }
+ 
+ /*
+@@ -1575,6 +1679,7 @@ int main(int argc, char **argv)
+ 	ext2_filsys fs;
+ 	struct ext2_super_block *sb;
+ 	io_manager io_ptr, io_ptr_orig = NULL;
++	int rc = 0;
+ 
+ #ifdef ENABLE_NLS
+ 	setlocale(LC_MESSAGES, "");
+@@ -1604,14 +1709,26 @@ int main(int argc, char **argv)
+ 		io_ptr = unix_io_manager;
+ 
+ retry_open:
++	if ((open_flag & EXT2_FLAG_RW) == 0 || f_flag)
++		 open_flag |= EXT2_FLAG_SKIP_MMP;
++
+ 	retval = ext2fs_open2(device_name, io_options, open_flag,
+ 			      0, 0, io_ptr, &fs);
+ 	if (retval) {
+-			com_err(program_name, retval,
+-				_("while trying to open %s"),
++		com_err(program_name, retval,
++			_("while trying to open %s"),
+ 			device_name);
+-		fprintf(stderr,
+-			_("Couldn't find valid filesystem superblock.\n"));
++		if (retval == EXT2_ET_MMP_FSCK_ON)
++			fprintf(stderr,
++				_("If you are sure e2fsck is not running then "
++				  "use 'tune2fs -f -E clear_mmp {device}'\n"));
++		else if (retval == EXT2_ET_MMP_MAGIC_INVALID)
++			fprintf(stderr,
++				_("Magic for mmp is wrong. Try to fix it by "
++				  "using 'fsck {device}'\n"));
++		else if (retval != EXT2_ET_MMP_FAILED)
++			fprintf(stderr,
++			     _("Couldn't find valid filesystem superblock.\n"));
+ 		exit(1);
+ 	}
+ 
+@@ -1624,12 +1741,14 @@ retry_open:
+ 		if (new_inode_size == EXT2_INODE_SIZE(fs->super)) {
+ 			fprintf(stderr, _("The inode size is already %lu\n"),
+ 				new_inode_size);
+-			exit(1);
++			rc = 1;
++			goto closefs;
+ 		}
+ 		if (new_inode_size < EXT2_INODE_SIZE(fs->super)) {
+ 			fprintf(stderr, _("Shrinking the inode size is "
+ 					  "not supported\n"));
+-			exit(1);
++			rc = 1;
++			goto closefs;
+ 		}
+ 
+ 		/*
+@@ -1638,8 +1757,10 @@ retry_open:
+ 		 */
+ 		io_ptr_orig = io_ptr;
+ 		retval = tune2fs_setup_tdb(device_name, &io_ptr);
+-		if (retval)
+-			exit(1);
++		if (retval) {
++			rc = 1;
++			goto closefs;
++		}
+ 		if (io_ptr != io_ptr_orig) {
+ 			ext2fs_close(fs);
+ 			goto retry_open;
+@@ -1654,7 +1775,7 @@ retry_open:
+ 		printf("%.*s\n", (int) sizeof(sb->s_volume_name),
+ 		       sb->s_volume_name);
+ 		remove_error_table(&et_ext2_error_table);
+-		exit(0);
++		goto closefs;
+ 	}
+ 
+ 	retval = ext2fs_check_if_mounted(device_name, &mount_flags);
+@@ -1662,7 +1783,8 @@ retry_open:
+ 		com_err("ext2fs_check_if_mount", retval,
+ 			_("while determining whether %s is mounted."),
+ 			device_name);
+-		exit(1);
++		rc = 1;
++		goto closefs;
+ 	}
+ 	/* Normally we only need to write out the superblock */
+ 	fs->flags |= EXT2_FLAG_SUPER_ONLY;
+@@ -1702,12 +1824,19 @@ retry_open:
+ 			 "(%u blocks)\n"),
+ 		       reserved_ratio, sb->s_r_blocks_count);
+ 	}
++	if (p_flag) {
++		sb->s_mmp_update_interval = mmp_update_interval;
++		ext2fs_mark_super_dirty(fs);
++		printf(_("Setting multiple mount protection update interval to "
++			  "%u seconds\n"), mmp_update_interval);
++	}
+ 	if (r_flag) {
+ 		if (reserved_blocks >= sb->s_blocks_count/2) {
+ 			com_err(program_name, 0,
+ 				_("reserved blocks count is too big (%lu)"),
+ 				reserved_blocks);
+-			exit(1);
++			rc = 1;
++			goto closefs;
+ 		}
+ 		sb->s_r_blocks_count = reserved_blocks;
+ 		ext2fs_mark_super_dirty(fs);
+@@ -1731,7 +1860,8 @@ retry_open:
+ 	if (s_flag == 0) {
+ 		fputs(_("\nClearing the sparse superflag not supported.\n"),
+ 		      stderr);
+-		exit(1);
++		rc = 1;
++		goto closefs;
+ 	}
+ 	if (T_flag) {
+ 		sb->s_lastcheck = last_check_time;
+@@ -1759,14 +1889,36 @@ retry_open:
+ 			sizeof(sb->s_last_mounted));
+ 		ext2fs_mark_super_dirty(fs);
+ 	}
+-	if (mntopts_cmd)
+-		update_mntopts(fs, mntopts_cmd);
+-	if (features_cmd)
+-		update_feature_set(fs, features_cmd);
+-	if (extended_cmd)
+-		parse_extended_opts(fs, extended_cmd);
+-	if (journal_size || journal_device)
+-		add_journal(fs);
++	if (mntopts_cmd) {
++		rc = update_mntopts(fs, mntopts_cmd);
++		if (rc)
++			goto closefs;
++	}
++	if (features_cmd) {
++		rc = update_feature_set(fs, features_cmd);
++		if (rc)
++			goto closefs;
++	}
++	if (extended_cmd) {
++		rc = parse_extended_opts(fs, extended_cmd);
++		if (rc)
++			goto closefs;
++		if (clear_mmp && !f_flag) {
++			fputs(_("Error in using clear_mmp. "
++			        "It must be used with -f\n"),
++			      stderr);
++			goto closefs;
++		}
++	}
++	if (clear_mmp) {
++		rc = ext2fs_mmp_clear(fs);
++		goto closefs;
++	}
++	if (journal_size || journal_device) {
++		rc = add_journal(fs);
++		if (rc);
++			goto closefs;
++	}
+ 
+ 	if (U_flag) {
+ 		int set_csum = 0;
+@@ -1794,7 +1946,8 @@ retry_open:
+ 			uuid_generate(sb->s_uuid);
+ 		} else if (uuid_parse(new_UUID, sb->s_uuid)) {
+ 			com_err(program_name, 0, _("Invalid UUID format\n"));
+-			exit(1);
++			rc = 1;
++			goto closefs;
+ 		}
+ 		if (set_csum) {
+ 			for (i = 0; i < fs->group_desc_count; i++)
+@@ -1808,7 +1961,8 @@ retry_open:
+ 			fputs(_("The inode size may only be "
+ 				"changed when the filesystem is "
+ 				"unmounted.\n"), stderr);
+-			exit(1);
++			rc = 1;
++			goto closefs;
+ 		}
+ 		if (fs->super->s_feature_incompat &
+ 		    EXT4_FEATURE_INCOMPAT_FLEX_BG) {
+@@ -1843,5 +1997,12 @@ retry_open:
+ 	}
+ 	free(device_name);
+ 	remove_error_table(&et_ext2_error_table);
++
++closefs:
++	if (rc) {
++		ext2fs_mmp_stop(fs);
++		exit(1);
++	}
++
+ 	return (ext2fs_close(fs) ? 1 : 0);
+ }
+Index: e2fsprogs-1.41.12/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass1.c
++++ e2fsprogs-1.41.12/e2fsck/pass1.c
+@@ -867,7 +867,20 @@ void e2fsck_pass1(e2fsck_t ctx)
+ 	    (fs->super->s_mtime < fs->super->s_inodes_count))
+ 		busted_fs_time = 1;
+ 
++	if ((fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) &&
++	    !(fs->super->s_mmp_block <= fs->super->s_first_data_block ||
++	      fs->super->s_mmp_block >= fs->super->s_blocks_count))
++		ext2fs_mark_block_bitmap(ctx->block_found_map,
++					 fs->super->s_mmp_block);
++
+ 	while (1) {
++		if (ino % EXT2_MMP_INODE_INTERVAL == 0) {
++			errcode_t error;
++
++			error = e2fsck_mmp_update(fs);
++			if (error)
++				fatal_error(ctx, 0);
++		}
+ 		old_op = ehandler_operation(_("getting next inode from scan"));
+ 		pctx.errcode = ext2fs_get_next_inode_full(scan, &ino,
+ 							  inode, inode_size);
+Index: e2fsprogs-1.41.12/e2fsck/pass1b.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/pass1b.c
++++ e2fsprogs-1.41.12/e2fsck/pass1b.c
+@@ -286,6 +286,13 @@ static void pass1b(e2fsck_t ctx, char *b
+ 	pb.pctx = &pctx;
+ 	pctx.str = "pass1b";
+ 	while (1) {
++		if (ino % EXT2_MMP_INODE_INTERVAL == 0) {
++			errcode_t error;
++
++			error = e2fsck_mmp_update(fs);
++			if (error)
++				fatal_error(ctx, 0);
++		}
+ 		pctx.errcode = ext2fs_get_next_inode(scan, &ino, &inode);
+ 		if (pctx.errcode == EXT2_ET_BAD_BLOCK_IN_INODE_TABLE)
+ 			continue;
+Index: e2fsprogs-1.41.12/e2fsck/unix.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/unix.c
++++ e2fsprogs-1.41.12/e2fsck/unix.c
+@@ -1041,6 +1041,70 @@ static errcode_t try_open_fs(e2fsck_t ct
+ static const char *my_ver_string = E2FSPROGS_VERSION;
+ static const char *my_ver_date = E2FSPROGS_DATE;
+ 
++int e2fsck_check_mmp(ext2_filsys fs, e2fsck_t ctx)
++{
++	struct mmp_struct *mmp_s;
++	unsigned int mmp_check_interval;
++	errcode_t retval = 0;
++	struct problem_context pctx;
++	unsigned int wait_time = 0;
++
++	clear_problem_context(&pctx);
++	if (fs->mmp_buf == NULL) {
++		retval = ext2fs_get_mem(fs->blocksize, &fs->mmp_buf);
++		if (retval)
++			goto check_error;
++	}
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto check_error;
++
++	mmp_s = fs->mmp_buf;
++
++	mmp_check_interval = fs->super->s_mmp_update_interval;
++	if (mmp_check_interval < EXT2_MMP_MIN_CHECK_INTERVAL)
++		mmp_check_interval = EXT2_MMP_MIN_CHECK_INTERVAL;
++
++	/*
++ 	 * If check_interval in MMP block is larger, use that instead of
++	 * check_interval from the superblock.
++	 */
++	if (mmp_s->mmp_check_interval > mmp_check_interval)
++		mmp_check_interval = mmp_s->mmp_check_interval;
++
++	wait_time = mmp_check_interval * 2 + 1;
++
++	/* Print warning if e2fck will wait for more than 20 secs. */
++	if (wait_time > EXT2_MMP_MIN_CHECK_INTERVAL * 4) {
++		printf("MMP interval is %u seconds and total wait time is %u "
++		       "seconds. Please wait...\n",
++			mmp_check_interval, wait_time * 2);
++	}
++
++	return 0;
++
++check_error:
++
++	if (retval == EXT2_ET_MMP_BAD_BLOCK) {
++		if (fix_problem(ctx, PR_0_MMP_INVALID_BLK, &pctx)) {
++			fs->super->s_mmp_block = 0;
++			ext2fs_mark_super_dirty(fs);
++		}
++	} else if (retval == EXT2_ET_MMP_FAILED) {
++		dump_mmp_msg(fs->mmp_buf, NULL);
++	} else if (retval == EXT2_ET_MMP_FSCK_ON) {
++		dump_mmp_msg(fs->mmp_buf,
++			     _("If you are sure that e2fsck "
++			       "is not running on any node then use "
++			       "'tune2fs -f -E clear_mmp {device}'\n"));
++	} else if (retval == EXT2_ET_MMP_MAGIC_INVALID) {
++		if (fix_problem(ctx, PR_0_MMP_INVALID_MAGIC, &pctx))
++			ext2fs_mmp_clear(fs);
++	}
++	return 1;
++}
++
+ int main (int argc, char *argv[])
+ {
+ 	errcode_t	retval = 0, retval2 = 0, orig_retval = 0;
+@@ -1109,6 +1173,8 @@ int main (int argc, char *argv[])
+ 				    _("need terminal for interactive repairs"));
+ 	}
+ 	ctx->superblock = ctx->use_superblock;
++
++	flags = EXT2_FLAG_SKIP_MMP;
+ restart:
+ #ifdef CONFIG_TESTIO_DEBUG
+ 	if (getenv("TEST_IO_FLAGS") || getenv("TEST_IO_BLOCK")) {
+@@ -1117,7 +1183,7 @@ restart:
+ 	} else
+ #endif
+ 		io_ptr = unix_io_manager;
+-	flags = EXT2_FLAG_NOFREE_ON_ERROR;
++	flags |= EXT2_FLAG_NOFREE_ON_ERROR;
+ 	if ((ctx->options & E2F_OPT_READONLY) == 0)
+ 		flags |= EXT2_FLAG_RW | EXT2_FLAG_EXCLUSIVE;
+ 	/* we would abort above in check_mount() unless user asks for this */
+@@ -1283,6 +1349,21 @@ failure:
+ 
+ 	ehandler_init(fs->io);
+ 
++	if ((fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) &&
++	    (flags & EXT2_FLAG_SKIP_MMP)) {
++		if (e2fsck_check_mmp(fs, ctx))
++			fatal_error(ctx, 0);
++	}
++
++	 /*
++	  * Restart in order to reopen fs but this time start mmp.
++	  */
++	if (flags & EXT2_FLAG_SKIP_MMP) {
++		ext2fs_close(fs);
++		flags &=~EXT2_FLAG_SKIP_MMP;
++		goto restart;
++	}
++
+ 	if ((ctx->mount_flags & EXT2_MF_MOUNTED) &&
+ 	    !(sb->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER))
+ 		goto skip_journal;
+Index: e2fsprogs-1.41.12/e2fsck/problem.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.c
++++ e2fsprogs-1.41.12/e2fsck/problem.c
+@@ -414,6 +414,16 @@ static struct e2fsck_problem problem_tab
+ 	  N_("Disable extra_isize feature since @f has 128 byte inodes.\n"),
+ 	  PROMPT_NONE, 0 },
+ 
++	/* Superblock has invalid MMP block. */
++	{ PR_0_MMP_INVALID_BLK,
++	  N_("@S has invalid MMP block.  "),
++	  PROMPT_CLEAR, PR_PREEN_OK },
++
++	/* Superblock has invalid MMP magic. */
++	{ PR_0_MMP_INVALID_MAGIC,
++	  N_("@S has invalid MMP magic.  "),
++	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK},
++
+ 
+ 	/* Pass 1 errors */
+ 
+Index: e2fsprogs-1.41.12/e2fsck/problem.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/problem.h
++++ e2fsprogs-1.41.12/e2fsck/problem.h
+@@ -238,6 +238,11 @@ struct problem_context {
+ /* Clear EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE flag */
+ #define PR_0_CLEAR_EXTRA_ISIZE			0x000042
+ 
++/* Superblock has invalid MMP block. */
++#define PR_0_MMP_INVALID_BLK			0x000043
++
++/* Superblock has invalid MMP magic. */
++#define PR_0_MMP_INVALID_MAGIC			0x000044
+ 
+ /*
+  * Pass 1 errors
+Index: e2fsprogs-1.41.12/lib/ext2fs/swapfs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/swapfs.c
++++ e2fsprogs-1.41.12/lib/ext2fs/swapfs.c
+@@ -70,6 +70,8 @@ void ext2fs_swap_super(struct ext2_super
+ 	sb->s_min_extra_isize = ext2fs_swab16(sb->s_min_extra_isize);
+ 	sb->s_want_extra_isize = ext2fs_swab16(sb->s_want_extra_isize);
+ 	sb->s_flags = ext2fs_swab32(sb->s_flags);
++	sb->s_mmp_update_interval = ext2fs_swab16(sb->s_mmp_update_interval);
++	sb->s_mmp_block = ext2fs_swab64(sb->s_mmp_block);
+ 	sb->s_kbytes_written = ext2fs_swab64(sb->s_kbytes_written);
+ 	for (i=0; i < 4; i++)
+ 		sb->s_hash_seed[i] = ext2fs_swab32(sb->s_hash_seed[i]);
+@@ -282,4 +284,12 @@ void ext2fs_swap_inode(ext2_filsys fs, s
+ 				sizeof(struct ext2_inode));
+ }
+ 
++void ext2fs_swap_mmp(struct mmp_struct *mmp)
++{
++	mmp->mmp_magic = ext2fs_swab32(mmp->mmp_magic);
++	mmp->mmp_seq = ext2fs_swab32(mmp->mmp_seq);
++	mmp->mmp_time = ext2fs_swab64(mmp->mmp_time);
++	mmp->mmp_check_interval = ext2fs_swab16(mmp->mmp_check_interval);
++}
++
+ #endif
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_err.et.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2_err.et.in
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2_err.et.in
+@@ -443,4 +443,25 @@ ec	EXT2_ET_EA_NAME_NOT_FOUND,
+ ec	EXT2_ET_EA_NAME_EXISTS,
+ 	"Extended attribute name already exists"
+ 
++ec	EXT2_ET_MMP_MAGIC_INVALID,
++	"MMP: invalid magic number"
++
++ec	EXT2_ET_MMP_FAILED,
++	"MMP: device currently active"
++
++ec	EXT2_ET_MMP_FSCK_ON,
++	"MMP: fsck being run"
++
++ec	EXT2_ET_MMP_BAD_BLOCK,
++	"MMP: block number beyond filesystem range"
++
++ec	EXT2_ET_MMP_UNKNOWN_SEQ,
++	"MMP: undergoing an unknown operation"
++
++ec	EXT2_ET_MMP_CHANGE_ABORT,
++	"MMP: filesystem still in use"
++
++ec	EXT2_ET_MMP_OPEN_DIRECT,
++	"MMP: open with O_DIRECT failed"
++
+ 	end
+Index: e2fsprogs-1.41.12/lib/ext2fs/openfs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/openfs.c
++++ e2fsprogs-1.41.12/lib/ext2fs/openfs.c
+@@ -22,6 +22,9 @@
+ #if HAVE_SYS_TYPES_H
+ #include <sys/types.h>
+ #endif
++#ifdef HAVE_ERRNO_H
++#include <errno.h>
++#endif
+ 
+ #include "ext2_fs.h"
+ 
+@@ -76,6 +79,7 @@ errcode_t ext2fs_open(const char *name, 
+  * 	EXT2_FLAG_FORCE - Open the filesystem even if some of the
+  *				features aren't supported.
+  *	EXT2_FLAG_JOURNAL_DEV_OK - Open an ext3 journal device
++ *	EXT2_FLAG_SKIP_MMP - Open without multi-mount protection check.
+  */
+ errcode_t ext2fs_open2(const char *name, const char *io_options,
+ 		       int flags, int superblock,
+@@ -353,6 +357,18 @@ errcode_t ext2fs_open2(const char *name,
+ 
+ 	fs->flags &= ~EXT2_FLAG_NOFREE_ON_ERROR;
+ 	*ret_fs = fs;
++
++	if ((fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) &&
++	    !(flags & EXT2_FLAG_SKIP_MMP)
++	    && (flags & (EXT2_FLAG_RW | EXT2_FLAG_EXCLUSIVE))) {
++		retval = ext2fs_mmp_start(fs);
++		if (retval) {
++			fs->flags |= EXT2_FLAG_SKIP_MMP; /* just do cleanup */
++			ext2fs_mmp_stop(fs);
++			goto cleanup;
++		}
++	}
++
+ 	return 0;
+ cleanup:
+ 	if (flags & EXT2_FLAG_NOFREE_ON_ERROR)
+Index: e2fsprogs-1.41.12/lib/ext2fs/closefs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/closefs.c
++++ e2fsprogs-1.41.12/lib/ext2fs/closefs.c
+@@ -397,6 +397,11 @@ errcode_t ext2fs_close(ext2_filsys fs)
+ 		if (retval)
+ 			return retval;
+ 	}
++
++	retval = ext2fs_mmp_stop(fs);
++	if (retval)
++		return retval;
++
+ 	ext2fs_free(fs);
+ 	return 0;
+ }
+Index: e2fsprogs-1.41.12/e2fsck/e2fsck.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/e2fsck.c
++++ e2fsprogs-1.41.12/e2fsck/e2fsck.c
+@@ -202,6 +202,7 @@ int e2fsck_run(e2fsck_t ctx)
+ {
+ 	int	i;
+ 	pass_t	e2fsck_pass;
++	int error;
+ 
+ #ifdef HAVE_SETJMP_H
+ 	if (setjmp(ctx->abort_loc)) {
+@@ -214,6 +215,9 @@ int e2fsck_run(e2fsck_t ctx)
+ 	for (i=0; (e2fsck_pass = e2fsck_passes[i]); i++) {
+ 		if (ctx->flags & E2F_FLAG_RUN_RETURN)
+ 			break;
++		error = e2fsck_mmp_update(ctx->fs);
++		if (error)
++			fatal_error(ctx, 0);
+ 		e2fsck_pass(ctx);
+ 		if (ctx->progress)
+ 			(void) (ctx->progress)(ctx, 0, 0, 0);
+Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/e2fsck.h
++++ e2fsprogs-1.41.12/e2fsck/e2fsck.h
+@@ -559,6 +559,8 @@ extern blk_t get_backup_sb(e2fsck_t ctx,
+ 			   const char *name, io_manager manager);
+ extern int ext2_file_type(unsigned int mode);
+ extern int write_all(int fd, char *buf, size_t count);
++void dump_mmp_msg(struct mmp_struct *mmp, const char *msg);
++errcode_t e2fsck_mmp_update(ext2_filsys fs);
+ 
+ /* unix.c */
+ extern void e2fsck_clear_progbar(e2fsck_t ctx);
+Index: e2fsprogs-1.41.12/e2fsck/util.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/util.c
++++ e2fsprogs-1.41.12/e2fsck/util.c
+@@ -48,6 +48,7 @@ void fatal_error(e2fsck_t ctx, const cha
+ 	if (msg)
+ 		fprintf (stderr, "e2fsck: %s\n", msg);
+ 	if (ctx->fs && ctx->fs->io) {
++		ext2fs_mmp_stop(ctx->fs);
+ 		if (ctx->fs->io->magic == EXT2_ET_MAGIC_IO_CHANNEL)
+ 			io_channel_flush(ctx->fs->io);
+ 		else
+@@ -709,3 +710,24 @@ int write_all(int fd, char *buf, size_t 
+ 	}
+ 	return c;
+ }
++
++void dump_mmp_msg(struct mmp_struct *mmp, const char *msg)
++{
++	if (msg)
++		printf("MMP check failed: %s\n", msg);
++	printf("MMP failure info: last update time: %llu node: %s device: %s\n",
++	       (long long)mmp->mmp_time, mmp->mmp_nodename, mmp->mmp_bdevname);
++}
++
++errcode_t e2fsck_mmp_update(ext2_filsys fs)
++{
++	errcode_t retval;
++
++	retval = ext2fs_mmp_update(fs);
++	if (retval == EXT2_ET_MMP_CHANGE_ABORT)
++		dump_mmp_msg(fs->mmp_cmp,
++			     _("UNEXPECTED INCONSISTENCY: the filesystem is "
++			       "being modified while fsck is running.\n"));
++
++	return retval;
++}
+Index: e2fsprogs-1.41.12/lib/ext2fs/freefs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/freefs.c
++++ e2fsprogs-1.41.12/lib/ext2fs/freefs.c
+@@ -53,6 +53,11 @@ void ext2fs_free(ext2_filsys fs)
+ 	if (fs->icache)
+ 		ext2fs_free_inode_cache(fs->icache);
+ 
++	if (fs->mmp_buf)
++		ext2fs_free_mem(&fs->mmp_buf);
++	if (fs->mmp_unaligned_buf)
++		ext2fs_free_mem(&fs->mmp_unaligned_buf);
++
+ 	fs->magic = 0;
+ 
+ 	ext2fs_free_mem(&fs);
+Index: e2fsprogs-1.41.12/lib/ext2fs/Makefile.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/Makefile.in
++++ e2fsprogs-1.41.12/lib/ext2fs/Makefile.in
+@@ -61,6 +61,7 @@ OBJS= $(DEBUGFS_LIB_OBJS) $(RESIZE_LIB_O
+ 	lookup.o \
+ 	mkdir.o \
+ 	mkjournal.o \
++	mmp.o \
+ 	namei.o \
+ 	native.o \
+ 	newdir.o \
+@@ -125,6 +126,7 @@ SRCS= ext2_err.c \
+ 	$(srcdir)/lookup.c \
+ 	$(srcdir)/mkdir.c \
+ 	$(srcdir)/mkjournal.c \
++	$(srcdir)/mmp.c	\
+ 	$(srcdir)/namei.c \
+ 	$(srcdir)/native.c \
+ 	$(srcdir)/newdir.c \
+@@ -625,6 +627,8 @@ mkjournal.o: $(srcdir)/mkjournal.c $(src
+  $(top_builddir)/lib/ext2fs/ext2_err.h $(srcdir)/ext2_ext_attr.h \
+  $(srcdir)/bitops.h $(srcdir)/jfs_user.h $(srcdir)/kernel-jbd.h \
+  $(srcdir)/jfs_compat.h $(srcdir)/kernel-list.h
++mmp.o: $(srcdir)/ext2_fs.h $(srcdir)/ext2fs.h \
++ $(top_builddir)/lib/ext2fs/ext2_err.h
+ namei.o: $(srcdir)/namei.c $(srcdir)/ext2_fs.h \
+  $(top_builddir)/lib/ext2fs/ext2_types.h $(srcdir)/ext2fs.h \
+  $(srcdir)/ext2_fs.h $(srcdir)/ext3_extents.h $(top_srcdir)/lib/et/com_err.h \
+Index: e2fsprogs-1.41.12/lib/ext2fs/mmp.c
+===================================================================
+--- /dev/null
++++ e2fsprogs-1.41.12/lib/ext2fs/mmp.c
+@@ -0,0 +1,420 @@
++/*
++ * Helper functions for multiple mount protection(MMP).
++ *
++ * Copyright (C) 2006, 2007 by Kalpak Shah <kalpak@clusterfs.com>
++ *
++ * %Begin-Header%
++ * This file may be redistributed under the terms of the GNU Public
++ * License.
++ * %End-Header%
++ */
++
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#if HAVE_UNISTD_H
++#include <unistd.h>
++#endif
++#include <sys/time.h>
++
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++
++#include "ext2fs/ext2_fs.h"
++#include "ext2fs/ext2fs.h"
++
++static int mmp_pagesize(void)
++{
++#ifdef _SC_PAGESIZE
++	int sysval = sysconf(_SC_PAGESIZE);
++	if (sysval > 0)
++		return sysval;
++#endif /* _SC_PAGESIZE */
++#ifdef HAVE_GETPAGESIZE
++	return getpagesize();
++#else
++	return 4096;
++#endif
++}
++
++#define ptr_align(ptr, size)	(void *)(((unsigned long)(ptr) + (size) - 1) & \
++					 ~((unsigned long)(size) - 1))
++#ifndef O_DIRECT
++#define O_DIRECT 0
++#endif
++
++errcode_t ext2fs_mmp_read(ext2_filsys fs, blk_t mmp_blk, void *buf)
++{
++	struct mmp_struct *mmp_cmp;
++	errcode_t retval = 0;
++
++	if ((mmp_blk <= fs->super->s_first_data_block) ||
++	    (mmp_blk >= fs->super->s_blocks_count))
++		return EXT2_ET_MMP_BAD_BLOCK;
++
++	if (fs->mmp_cmp == NULL) {
++		/* O_DIRECT in linux 2.4: page aligned
++		 * O_DIRECT in linux 2.6: sector aligned
++		 * A filesystem cannot be created with blocksize < sector size,
++		 * or with blocksize > page_size. */
++		int bufsize = fs->blocksize;
++
++		if (bufsize < mmp_pagesize())
++			bufsize = mmp_pagesize();
++		retval = ext2fs_get_mem(bufsize * 2, &fs->mmp_unaligned_buf);
++		if (retval)
++			return retval;
++		fs->mmp_cmp = ptr_align(fs->mmp_unaligned_buf, bufsize);
++	}
++
++	/* ext2fs_open reserves fd0,1,2 to avoid stdio collision */
++	if (fs->mmp_fd <= 0) {
++		fs->mmp_fd = open(fs->device_name, O_RDWR | O_DIRECT);
++		if (fs->mmp_fd < 0) {
++			retval = EXT2_ET_MMP_OPEN_DIRECT;
++			goto out;
++		}
++	}
++
++	if (ext2fs_llseek(fs->mmp_fd, mmp_blk * fs->blocksize, SEEK_SET) !=
++	    mmp_blk * fs->blocksize) {
++		retval = EXT2_ET_LLSEEK_FAILED;
++		goto out;
++	}
++
++	if (read(fs->mmp_fd, fs->mmp_cmp, fs->blocksize) != fs->blocksize) {
++		retval = EXT2_ET_SHORT_READ;
++		goto out;
++	}
++
++	mmp_cmp = fs->mmp_cmp;
++#ifdef EXT2FS_ENABLE_SWAPFS
++	if (fs->flags & EXT2_FLAG_SWAP_BYTES)
++		ext2fs_swap_mmp(mmp_cmp);
++#endif
++
++	if (buf != NULL && buf != fs->mmp_cmp)
++		memcpy(buf, fs->mmp_cmp, fs->blocksize);
++
++	if (mmp_cmp->mmp_magic != EXT2_MMP_MAGIC) {
++		retval = EXT2_ET_MMP_MAGIC_INVALID;
++		goto out;
++	}
++
++out:
++	return retval;
++}
++
++errcode_t ext2fs_mmp_write(ext2_filsys fs, blk_t mmp_blk, void *buf)
++{
++	struct mmp_struct *mmp_s = buf;
++	struct timeval tv;
++	errcode_t retval = 0;
++
++	gettimeofday(&tv, 0);
++	mmp_s->mmp_time = tv.tv_sec;
++	fs->mmp_last_written = tv.tv_sec;
++
++#ifdef EXT2FS_ENABLE_SWAPFS
++	if (fs->super->s_magic == ext2fs_swab16(EXT2_SUPER_MAGIC))
++		ext2fs_swap_mmp(mmp_s);
++#endif
++
++	/* I was tempted to make this use O_DIRECT and the mmp_fd, but
++	 * this caused no end of grief, while leaving it as-is works. */
++	retval = io_channel_write_blk(fs->io, mmp_blk, -fs->blocksize, buf);
++
++#ifdef EXT2FS_ENABLE_SWAPFS
++	if (fs->super->s_magic == ext2fs_swab16(EXT2_SUPER_MAGIC))
++		ext2fs_swap_mmp(mmp_s);
++#endif
++
++	/* Make sure the block gets to disk quickly */
++	io_channel_flush(fs->io);
++	return retval;
++}
++
++#ifdef HAVE_SRANDOM
++#define srand(x) 	srandom(x)
++#define rand() 		random()
++#endif
++
++unsigned ext2fs_mmp_new_seq()
++{
++	unsigned new_seq;
++	struct timeval tv;
++
++	gettimeofday(&tv, 0);
++	srand((getpid() << 16) ^ getuid() ^ tv.tv_sec ^ tv.tv_usec);
++
++	gettimeofday(&tv, 0);
++	/* Crank the random number generator a few times */
++	for (new_seq = (tv.tv_sec ^ tv.tv_usec) & 0x1F; new_seq > 0; new_seq--)
++		rand();
++
++	do {
++		new_seq = rand();
++	} while (new_seq > EXT2_MMP_SEQ_MAX);
++
++	return new_seq;
++}
++
++static errcode_t ext2fs_mmp_reset(ext2_filsys fs)
++{
++	struct mmp_struct *mmp_s = NULL;
++	errcode_t retval = 0;
++
++	if (fs->mmp_buf == NULL) {
++		retval = ext2fs_get_mem(fs->blocksize, &fs->mmp_buf);
++		if (retval)
++			goto out;
++	}
++
++	memset(fs->mmp_buf, 0, fs->blocksize);
++	mmp_s = fs->mmp_buf;
++
++	mmp_s->mmp_magic = EXT2_MMP_MAGIC;
++	mmp_s->mmp_seq = EXT2_MMP_SEQ_CLEAN;
++	mmp_s->mmp_time = 0;
++#if _BSD_SOURCE || _XOPEN_SOURCE >= 500
++	gethostname(mmp_s->mmp_nodename, sizeof(mmp_s->mmp_nodename));
++#else
++	mmp_s->mmp_nodename[0] = '\0';
++#endif
++	strncpy(mmp_s->mmp_bdevname, fs->device_name,
++		sizeof(mmp_s->mmp_bdevname));
++
++	mmp_s->mmp_check_interval = fs->super->s_mmp_update_interval;
++	if (mmp_s->mmp_check_interval < EXT2_MMP_MIN_CHECK_INTERVAL)
++		mmp_s->mmp_check_interval = EXT2_MMP_MIN_CHECK_INTERVAL;
++
++	retval = ext2fs_mmp_write(fs, fs->super->s_mmp_block, fs->mmp_buf);
++out:
++	return retval;
++}
++
++errcode_t ext2fs_mmp_clear(ext2_filsys fs)
++{
++	struct mmp_struct *mmp_s = NULL;
++	errcode_t retval = 0;
++
++	if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) ||
++	    !(fs->flags & EXT2_FLAG_RW))
++		return 0;
++
++	retval = ext2fs_mmp_reset(fs);
++
++	return retval;
++}
++
++errcode_t ext2fs_mmp_init(ext2_filsys fs)
++{
++	struct ext2_super_block *sb = fs->super;
++	struct mmp_struct *mmp_s = NULL;
++	blk_t mmp_block;
++	errcode_t retval;
++
++	if (fs->mmp_buf == NULL) {
++		retval = ext2fs_get_mem(fs->blocksize, &fs->mmp_buf);
++		if (retval)
++			goto out;
++	}
++
++	retval = ext2fs_alloc_block(fs, 0, fs->mmp_buf, &mmp_block);
++	if (retval)
++		goto out;
++
++	sb->s_mmp_block = mmp_block;
++	sb->s_mmp_update_interval = EXT2_MMP_UPDATE_INTERVAL;
++
++	retval = ext2fs_mmp_reset(fs);
++	if (retval)
++		goto out;
++
++out:
++	return retval;
++}
++
++/*
++ * Make sure that the fs is not mounted or being fsck'ed while opening the fs.
++ */
++errcode_t ext2fs_mmp_start(ext2_filsys fs)
++{
++	struct mmp_struct *mmp_s;
++	unsigned seq;
++	unsigned int mmp_check_interval;
++	errcode_t retval = 0;
++
++	if (fs->mmp_buf == NULL) {
++		retval = ext2fs_get_mem(fs->blocksize, &fs->mmp_buf);
++		if (retval)
++			goto mmp_error;
++	}
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	mmp_s = fs->mmp_buf;
++
++	mmp_check_interval = fs->super->s_mmp_update_interval;
++	if (mmp_check_interval < EXT2_MMP_MIN_CHECK_INTERVAL)
++		mmp_check_interval = EXT2_MMP_MIN_CHECK_INTERVAL;
++
++	seq = mmp_s->mmp_seq;
++	if (seq == EXT2_MMP_SEQ_CLEAN)
++		goto clean_seq;
++	if (seq == EXT2_MMP_SEQ_FSCK) {
++		retval = EXT2_ET_MMP_FSCK_ON;
++		goto mmp_error;
++	}
++
++	if (seq > EXT2_MMP_SEQ_FSCK) {
++		retval = EXT2_ET_MMP_UNKNOWN_SEQ;
++		goto mmp_error;
++	}
++
++	/*
++	 * If check_interval in MMP block is larger, use that instead of
++	 * check_interval from the superblock.
++	 */
++	if (mmp_s->mmp_check_interval > mmp_check_interval)
++		mmp_check_interval = mmp_s->mmp_check_interval;
++
++	sleep(2 * mmp_check_interval + 1);
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	if (seq != mmp_s->mmp_seq) {
++		retval = EXT2_ET_MMP_FAILED;
++		goto mmp_error;
++	}
++
++clean_seq:
++	if (!(fs->flags & EXT2_FLAG_RW))
++		goto mmp_error;
++
++	mmp_s->mmp_seq = seq = ext2fs_mmp_new_seq();
++#if _BSD_SOURCE || _XOPEN_SOURCE >= 500
++	gethostname(mmp_s->mmp_nodename, sizeof(mmp_s->mmp_nodename));
++#else
++	strcpy(mmp_s->mmp_nodename, "unknown host");
++#endif
++	strncpy(mmp_s->mmp_bdevname, fs->device_name,
++		sizeof(mmp_s->mmp_bdevname));
++
++	retval = ext2fs_mmp_write(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	sleep(2 * mmp_check_interval + 1);
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	if (seq != mmp_s->mmp_seq) {
++		retval = EXT2_ET_MMP_FAILED;
++		goto mmp_error;
++	}
++
++	mmp_s->mmp_seq = EXT2_MMP_SEQ_FSCK;
++	retval = ext2fs_mmp_write(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	return 0;
++
++mmp_error:
++	return retval;
++}
++
++/*
++ * Clear the MMP usage in the filesystem.  If this function returns an
++ * error EXT2_ET_MMP_CHANGE_ABORT it means the filesystem was modified
++ * by some other process while in use, and changes should be dropped, or
++ * risk filesystem corruption.
++ */
++errcode_t ext2fs_mmp_stop(ext2_filsys fs)
++{
++	struct mmp_struct *mmp, *mmp_cmp;
++	errcode_t retval = 0;
++
++	if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) ||
++	    !(fs->flags & EXT2_FLAG_RW) || (fs->flags & EXT2_FLAG_SKIP_MMP))
++		goto mmp_error;
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
++	if (retval)
++		goto mmp_error;
++
++	/* Check if the MMP block is not changed. */
++	mmp = fs->mmp_buf;
++	mmp_cmp = fs->mmp_cmp;
++	if (memcmp(mmp, mmp_cmp, sizeof(*mmp_cmp))) {
++		retval = EXT2_ET_MMP_CHANGE_ABORT;
++		goto mmp_error;
++	}
++
++check_skipped:
++	mmp_cmp->mmp_seq = EXT2_MMP_SEQ_CLEAN;
++	retval = ext2fs_mmp_write(fs, fs->super->s_mmp_block, fs->mmp_cmp);
++
++mmp_error:
++	if (fs->mmp_fd > 0) {
++		close(fs->mmp_fd);
++		fs->mmp_fd = -1;
++	}
++	if (fs->mmp_buf) {
++		ext2fs_free_mem(&fs->mmp_buf);
++		fs->mmp_buf = NULL;
++	}
++	if (fs->mmp_unaligned_buf) {
++		ext2fs_free_mem(&fs->mmp_unaligned_buf);
++		fs->mmp_unaligned_buf = NULL;
++		fs->mmp_cmp = NULL;
++	}
++
++	return retval;
++}
++
++#define EXT2_MIN_MMP_UPDATE_INTERVAL 60
++
++/*
++ * Update the on-disk mmp buffer, after checking that it hasn't been changed.
++ */
++errcode_t ext2fs_mmp_update(ext2_filsys fs)
++{
++	struct mmp_struct *mmp, *mmp_cmp;
++	struct timeval tv;
++	errcode_t retval = 0;
++
++	if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) ||
++	    !(fs->flags & EXT2_FLAG_RW) || (fs->flags & EXT2_FLAG_SKIP_MMP))
++		return 0;
++
++	gettimeofday(&tv, 0);
++	if (tv.tv_sec - fs->mmp_last_written < EXT2_MIN_MMP_UPDATE_INTERVAL)
++		return 0;
++
++	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, NULL);
++	if (retval)
++		goto mmp_error;
++
++	mmp = fs->mmp_buf;
++	mmp_cmp = fs->mmp_cmp;
++
++	if (memcmp(mmp, mmp_cmp, sizeof(*mmp_cmp)))
++		return EXT2_ET_MMP_CHANGE_ABORT;
++
++	mmp->mmp_time = tv.tv_sec;
++	mmp->mmp_seq = EXT2_MMP_SEQ_FSCK;
++	retval = ext2fs_mmp_write(fs, fs->super->s_mmp_block, fs->mmp_buf);
++
++mmp_error:
++	return retval;
++}
+Index: e2fsprogs-1.41.12/misc/tune2fs.8.in
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/tune2fs.8.in
++++ e2fsprogs-1.41.12/misc/tune2fs.8.in
+@@ -161,6 +161,11 @@ separated, and may take an argument usin
+ The following extended options are supported:
+ .RS 1.2i
+ .TP
++.B clear-mmp
++Reset the MMP block (if any) back to the clean state.  Use only if
++absolutely certain the device is not currently mounted or being
++fscked, or major filesystem corruption can result.  Needs '-f'.
++.TP
+ .BI stride= stride-size
+ Configure the filesystem for a RAID array with
+ .I stride-size
+@@ -464,6 +469,11 @@ future.
+ .B Tune2fs 
+ only supports clearing this filesystem feature.
+ .TP
++.B mmp
++Enable or disable multiple mount protection(MMP) feature. MMP helps to protect
++the filesystem from being multiply mounted and is useful in shared storage
++environment.
++.TP
+ .B sparse_super
+ Limit the number of backup superblocks to save space on large filesystems.
+ .TP
+@@ -500,6 +510,9 @@ and
+ .BR flex_bg
+ features are only supported by the ext4 filesystem.
+ .TP
++.BI \-p " mmp_check_interval"
++Set the desired MMP check interval in seconds. It is 5 seconds by default.
++.TP
+ .BI \-r " reserved-blocks-count"
+ Set the number of reserved filesystem blocks.
+ .TP
+Index: e2fsprogs-1.41.12/misc/mke2fs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/mke2fs.c
++++ e2fsprogs-1.41.12/misc/mke2fs.c
+@@ -847,7 +847,8 @@ static __u32 ok_features[3] = {
+ 		EXT3_FEATURE_INCOMPAT_EXTENTS|
+ 		EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|
+ 		EXT2_FEATURE_INCOMPAT_META_BG|
+-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
++		EXT4_FEATURE_INCOMPAT_FLEX_BG|
++		EXT4_FEATURE_INCOMPAT_MMP,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE|
+ 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
+@@ -2255,8 +2256,20 @@ int main (int argc, char *argv[])
+ 	}
+ no_journal:
+ 
+-	if (!super_only)
++	if (!super_only) {
+ 		ext2fs_set_gdt_csum(fs);
++		if (fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) {
++			retval = ext2fs_mmp_init(fs);
++			if (retval) {
++				fprintf(stderr, _("\nError while enabling "
++					"multiple mount protection feature."));
++				exit(1);
++			}
++			printf(_("Multiple mount protection has been enabled "
++				 "with update interval %d seconds.\n"),
++				 fs->super->s_mmp_update_interval);
++		}
++	}
+ 	if (!quiet)
+ 		printf(_("Writing superblocks and "
+ 		       "filesystem accounting information: "));
+Index: e2fsprogs-1.41.12/lib/e2p/ls.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/lib/e2p/ls.c
++++ e2fsprogs-1.41.12/lib/e2p/ls.c
+@@ -330,6 +330,12 @@ void list_super2(struct ext2_super_block
+ 			fprintf(f, "type %u\n", sb->s_jnl_backup_type);
+ 		}
+ 	}
++	if (sb->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) {
++		fprintf(f, "MMP block number:         %llu\n",
++			(long long)sb->s_mmp_block);
++		fprintf(f, "MMP update interval:      %u\n",
++			sb->s_mmp_update_interval);
++	}
+ }
+ 
+ void list_super (struct ext2_super_block * s)
+Index: e2fsprogs-1.41.12/debugfs/set_fields.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/debugfs/set_fields.c
++++ e2fsprogs-1.41.12/debugfs/set_fields.c
+@@ -129,7 +129,7 @@ static struct field_set_info super_field
+ 	{ "flags", &set_sb.s_flags, 4, parse_uint },
+ 	{ "raid_stride", &set_sb.s_raid_stride, 2, parse_uint },
+ 	{ "min_extra_isize", &set_sb.s_min_extra_isize, 4, parse_uint },
+-	{ "mmp_interval", &set_sb.s_mmp_interval, 2, parse_uint },
++	{ "mmp_update_interval", &set_sb.s_mmp_update_interval, 2, parse_uint },
+ 	{ "mmp_block", &set_sb.s_mmp_block, 8, parse_uint },
+ 	{ "raid_stripe_width", &set_sb.s_raid_stripe_width, 4, parse_uint },
+ 	{ "log_groups_per_flex", &set_sb.s_log_groups_per_flex, 1, parse_uint },
+Index: e2fsprogs-1.41.12/misc/util.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/misc/util.c
++++ e2fsprogs-1.41.12/misc/util.c
+@@ -291,3 +291,11 @@ void print_check_message(ext2_filsys fs)
+ 	       fs->super->s_max_mnt_count,
+ 	       (double)fs->super->s_checkinterval / (3600 * 24));
+ }
++
++void dump_mmp_msg(struct mmp_struct *mmp, const char *msg)
++{
++	if (msg)
++		printf("MMP check failed: %s\n", msg);
++	printf("MMP failure info: last update time: %llu node: %s device: %s\n",
++	       (long long)mmp->mmp_time, mmp->mmp_nodename, mmp->mmp_bdevname);
++}
+Index: e2fsprogs-1.41.12/e2fsck/journal.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/e2fsck/journal.c
++++ e2fsprogs-1.41.12/e2fsck/journal.c
+@@ -880,6 +880,8 @@ int e2fsck_run_ext3_journal(e2fsck_t ctx
+ 		ctx->fs->io->manager->get_stats(ctx->fs->io, &stats);
+ 	if (stats && stats->bytes_written)
+ 		kbytes_written = stats->bytes_written >> 10;
++
++	ext2fs_mmp_stop(ctx->fs);
+ 	ext2fs_free(ctx->fs);
+ 	retval = ext2fs_open(ctx->filesystem_name, EXT2_FLAG_RW,
+ 			     ctx->superblock, blocksize, io_ptr,
+Index: e2fsprogs-1.41.12/debugfs/debug_cmds.ct
+===================================================================
+--- e2fsprogs-1.41.12.orig/debugfs/debug_cmds.ct
++++ e2fsprogs-1.41.12/debugfs/debug_cmds.ct
+@@ -160,5 +160,8 @@ request do_set_current_time, "Set curren
+ request do_supported_features, "Print features supported by this version of e2fsprogs",
+ 	supported_features;
+ 
++request do_dump_mmp, "Dump MMP information",
++	dump_mmp;
++
+ end;
+ 
+Index: e2fsprogs-1.41.12/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs-1.41.12.orig/debugfs/debugfs.c
++++ e2fsprogs-1.41.12/debugfs/debugfs.c
+@@ -78,6 +78,8 @@ static void open_filesystem(char *device
+ 			"opening read-only because of catastrophic mode");
+ 		open_flags &= ~EXT2_FLAG_RW;
+ 	}
++	if (catastrophic)
++		open_flags |= EXT2_FLAG_SKIP_MMP;
+ 
+ 	retval = ext2fs_open(device, open_flags, superblock, blocksize,
+ 			     unix_io_manager, &current_fs);
+@@ -2096,6 +2098,39 @@ void do_supported_features(int argc, cha
+ 	}
+ }
+ 
++void do_dump_mmp(int argc, char *argv[])
++{
++	struct mmp_struct *mmp_s;
++	errcode_t retval = 0;
++
++	if (current_fs->mmp_buf == NULL) {
++		retval = ext2fs_get_mem(current_fs->blocksize,
++					&current_fs->mmp_buf);
++		if (retval) {
++			com_err(argv[0], 0, "Could not allocate memory.\n");
++			return;
++	 	}
++	}
++
++	mmp_s = current_fs->mmp_buf;
++
++	retval = ext2fs_mmp_read(current_fs, current_fs->super->s_mmp_block,
++				 current_fs->mmp_buf);
++	if (retval) {
++		com_err(argv[0], retval, "Error reading MMP block.\n");
++		return;
++	}
++
++	fprintf(stdout, "MMP Block: %llu\n", current_fs->super->s_mmp_block);
++	fprintf(stdout, "MMP Update Interval: %d\n",
++		current_fs->super->s_mmp_update_interval);
++	fprintf(stdout, "MMP Check Interval: %d\n", mmp_s->mmp_check_interval);
++	fprintf(stdout, "MMP Sequence: %lu\n", mmp_s->mmp_seq);
++	fprintf(stdout, "Last Update Time: %llu\n", mmp_s->mmp_time);
++	fprintf(stdout, "Node: %s\n", mmp_s->mmp_nodename);
++	fprintf(stdout, "Device: %s\n", mmp_s->mmp_bdevname);
++}
++
+ static int source_file(const char *cmd_file, int sci_idx)
+ {
+ 	FILE		*f;
