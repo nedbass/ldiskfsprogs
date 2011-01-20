@@ -1168,14 +1168,3 @@
  	util/Makefile util/subst.conf util/gen-tarball \
  	lib/et/Makefile lib/ss/Makefile lib/e2p/Makefile \
  	lib/ext2fs/Makefile lib/ext2fs/ext2_types.h \
---- e2fsprogs-1.41.10.old/configure     2010-03-11 11:40:52.000000000 -0700
-+++ e2fsprogs-1.41.10/configure    2010-03-12 09:25:48.000000000 -0700
-@@ -17611,7 +17611,7 @@
- test -d include || mkdir include
- test -d include/linux || mkdir include/linux
- test -d include/asm || mkdir include/asm
--for i in MCONFIG Makefile e2fsprogs.spec \
-+for i in MCONFIG Makefile e2fsprogs.spec e2fsprogs-SUSE_LINUX-11.spec \
- 	util/Makefile util/subst.conf util/gen-tarball \
- 	lib/et/Makefile lib/ss/Makefile lib/e2p/Makefile \
- 	lib/ext2fs/Makefile lib/ext2fs/ext2_types.h \

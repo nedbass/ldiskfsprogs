@@ -985,7 +985,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/unix.c
 +++ e2fsprogs-1.41.12/e2fsck/unix.c
-@@ -664,6 +664,12 @@ static void parse_extended_opts(e2fsck_t
+@@ -668,6 +668,12 @@ static void parse_extended_opts(e2fsck_t
  				extended_usage++;
  				continue;
  			}
@@ -995,18 +995,18 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
 +				extended_usage++;
 +				continue;
 +			}
- 		} else {
- 			fprintf(stderr, _("Unknown extended option: %s\n"),
- 				token);
-@@ -681,6 +687,7 @@ static void parse_extended_opts(e2fsck_t
- 		fputs(("\tfragcheck\n"), stderr);
+ 		} else if (strcmp(token, "journal_only") == 0) {
+ 			if (arg) {
+ 				extended_usage++;
+@@ -692,6 +698,7 @@ static void parse_extended_opts(e2fsck_t
+ 		fputs(("\tjournal_only\n"), stderr);
  		fputs(("\tshared=<preserve|lost+found|delete>\n"), stderr);
  		fputs(("\tclone=<dup|zero>\n"), stderr);
 +		fputs(("\texpand_extra_isize\n"), stderr);
  		fputc('\n', stderr);
  		exit(1);
  	}
-@@ -1383,6 +1390,54 @@ print_unsupp_features:
+@@ -1405,6 +1412,54 @@ print_unsupp_features:
  	if (ctx->flags & E2F_FLAG_SIGNAL_MASK)
  		fatal_error(ctx, 0);
  	check_if_skip(ctx);
@@ -1118,7 +1118,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/e2fsck.h
 +++ e2fsprogs-1.41.12/e2fsck/e2fsck.h
-@@ -177,6 +177,7 @@ struct resource_track {
+@@ -178,6 +178,7 @@ struct resource_track {
  #define E2F_FLAG_GOT_DEVSIZE	0x0800 /* Device size has been fetched */
  #define E2F_FLAG_EXITING	0x1000 /* E2fsck exiting due to errors */
  #define E2F_FLAG_TIME_INSANE	0x2000 /* Time is insane */
@@ -1126,7 +1126,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  
  #define E2F_RESET_FLAGS (E2F_FLAG_TIME_INSANE)
  
-@@ -360,6 +361,15 @@ struct e2fsck_struct {
+@@ -361,6 +362,15 @@ struct e2fsck_struct {
  	profile_t	profile;
  	int blocks_per_page;
  
@@ -1159,7 +1159,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
  #if defined(__KERNEL__) || defined(__linux__)
  #define i_reserved1	osd1.linux1.l_i_reserved1
  #define i_frag		osd2.linux2.l_i_frag
-@@ -669,6 +675,7 @@ struct ext2_super_block {
+@@ -691,6 +697,7 @@ struct ext2_super_block {
  #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
  					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
  					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
@@ -1432,7 +1432,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
 +++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
-@@ -491,6 +491,12 @@ typedef struct ext2_icount *ext2_icount_
+@@ -492,6 +492,12 @@ typedef struct ext2_icount *ext2_icount_
  #define EXT2_CHECK_MAGIC(struct, code) \
  	  if ((struct)->magic != (code)) return (code)
  
@@ -1445,7 +1445,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  
  /*
   * For ext2 compression support
-@@ -834,6 +840,16 @@ extern errcode_t ext2fs_expand_dir(ext2_
+@@ -835,6 +841,16 @@ extern errcode_t ext2fs_expand_dir(ext2_
  /* ext_attr.c */
  extern __u32 ext2fs_ext_attr_hash_entry(struct ext2_ext_attr_entry *entry,
  					void *data);

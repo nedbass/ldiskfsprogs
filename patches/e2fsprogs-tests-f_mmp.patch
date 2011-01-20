@@ -49,8 +49,8 @@ Index: e2fsprogs-1.41.10/tests/f_mmp_off/script
 +
 +stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
 +if [ $? == 0 ] ; then
-+        echo "skipped for tmpfs (no O_DIRECT support)"
-+        return 0
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
 +fi
 +
 +$MKE2FS -q -F -o Linux -b 1024 -O mmp $TMPFILE 100 > $test_name.log 2>&1
@@ -90,8 +90,8 @@ Index: e2fsprogs-1.41.10/tests/f_mmp_on/script
 +
 +stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
 +if [ $? == 0 ] ; then
-+        echo "skipped for tmpfs (no O_DIRECT support)"
-+        return 0
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
 +fi
 +
 +$MKE2FS -q -F -o Linux -b 1024 $TMPFILE 100 > $test_name.log 2>&1
@@ -131,8 +131,8 @@ Index: e2fsprogs-1.41.10/tests/f_mmp_corrupt/script
 +
 +stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
 +if [ $? == 0 ] ; then
-+        echo "skipped for tmpfs (no O_DIRECT support)"
-+        return 0
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
 +fi
 +
 +echo "make the test image ..." > $test_name.log
@@ -140,7 +140,7 @@ Index: e2fsprogs-1.41.10/tests/f_mmp_corrupt/script
 +status=$?
 +if [ "$status" != 0 ] ; then
 +	echo "mke2fs -O mmp failed" >  $test_name.failed
-+        exit 1
++	exit 1
 +fi
 +
 +# create a corrupted image
@@ -153,15 +153,15 @@ Index: e2fsprogs-1.41.10/tests/f_mmp_corrupt/script
 +$FSCK $FSCK_OPT $TMPFILE >> $test_name.log 2>&1
 +status=$?
 +if [ "$status" != 0 ] ; then
-+        echo "the second fsck ..." >> $test_name.log
-+        $FSCK $FSCK_OPT $TMPFILE >> $test_name.log 2>&1
-+        status=$?
-+        if  [ "$status" = 0 ] ; then
-+            echo "ok"
-+            touch $test_name.ok
-+        else
-+            echo "the second fsck with corrupted mmp failed" >  $test_name.failed
-+        fi
++	echo "the second fsck ..." >> $test_name.log
++	$FSCK $FSCK_OPT $TMPFILE >> $test_name.log 2>&1
++	status=$?
++	if  [ "$status" = 0 ] ; then
++	    echo "ok"
++	    touch $test_name.ok
++	else
++	    echo "the second fsck with corrupted mmp failed" >  $test_name.failed
++	fi
 +else
 +	echo "the first fsck with corrupted mmp failed" >  $test_name.failed
 +fi

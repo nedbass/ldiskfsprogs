@@ -1,3 +1,37 @@
+2011-01-20	Whamcloud, Inc.
+	* version 1.41.14.wc1
+	     
+Severity   : enhancement
+Description: update to latest upstream e2fsprogs release
+Details    : Update to upstream e2fsprogs release 1.41.14.  This moves a
+	     few Lustre patches into mainstream e2fsprogs, like debugfs
+	     printing of flex_bg bitmap offsets. See RELEASE-NOTES.
+
+Severity   : enhancement
+Description: remove patches to configure
+Details    : Avoid patching the generated configure script, which was
+	     cumbersome and error-prone.  Instead, running configure with
+	     the --enable-maintainer-mode option will cause configure to
+	     be regenerated automatically when configure.in is patched.
+	     Add this as a default configure option to the RPM .spec file.
+
+Severity   : enhancement
+Description: add checks for db4.7 and db4.8 on newer distros for lfsck
+
+Severity   : minor
+Description: add "Obsoletes e4fsprogs" for installing on RHEL systems that
+	     provide an e4fsprogs RPM for ext4 testing.
+
+Severity   : enhancement
+Bugzilla   : 4424
+Description: Add basic regression test for large EAs in inodes
+	     
+Severity   : enhancement
+Description: Improve dumpe2fs output to print bitmap/itable offsets more
+	     sanely when flex_bg is configured on the filesystem.
+	     
+---------------------------------------------------------------------------
+
 2010-09-29	Oracle, Inc.
 	* version 1.41.12.2.ora1
 
@@ -41,6 +75,11 @@ Bugzilla   : 22421
 Description: Add check for ensuring that file system is writable before
 	     starting MMP.
 
+Severity   : enhancement
+Bugzilla   : 
+Description: Improve filefrag output so it can print new-style extent
+	     lists even if FIEMAP support is not available.
+	     
 ---------------------------------------------------------------------------
 
 2010-02-24	Sun Microsystems, Inc.

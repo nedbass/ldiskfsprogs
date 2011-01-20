@@ -29,11 +29,11 @@ bug, this part of the test is not enabled by default.
 Signed-off-by: Andreas Dilger <adilger@clusterfs.com>
 Signed-off-by: Kalpak Shah <kalpak@clusterfs.com>
 
-Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
+Index: e2fsprogs-1.41.14/tests/f_random_corruption/script
 ===================================================================
 --- /dev/null
-+++ e2fsprogs-1.41.10/tests/f_random_corruption/script
-@@ -0,0 +1,273 @@
++++ e2fsprogs-1.41.14/tests/f_random_corruption/script
+@@ -0,0 +1,272 @@
 +# This is to make sure that if this test fails other tests can still be run
 +# instead of doing an exit. We break before the end of the loop.
 +export LOOP_COUNT=${LOOP_COUNT:-1}
@@ -107,18 +107,17 @@ Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
 +fi
 +
 +modprobe ext4 2> /dev/null
-+modprobe ext4dev 2> /dev/null
 +
 +# If ext4 is present in the kernel then we can play with ext4 options
 +EXT4=`grep ext4 /proc/filesystems 2> /dev/null`
 +if [ -n "$EXT4" ]; then
 +	USE_EXT4=$((RANDOM % 2 ))
 +	if (( USE_EXT4 == 1 )); then
-+		FS_TYPE="ext4dev"
++		FS_TYPE="ext4"
 +	fi
 +fi
 +
-+if [ "$FS_TYPE" = "ext4dev" ]; then
++if [ "$FS_TYPE" = "ext4" ]; then
 +	UNINIT_GROUPS=$((RANDOM % 12 ))
 +	if (( UNINIT_GROUPS == 0 )); then
 +		FEATURES=$FEATURES,uninit_bg
@@ -158,7 +157,7 @@ Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
 +	[ -d $MNTPT ] && rmdir $MNTPT
 +	cp $OUT $OUT.$DATE
 +	echo " failed"
-+	echo "*** This appears to be a bug in e2fsprogs ***"
++	echo "error: *** This appears to be a bug in e2fsprogs ***"
 +	echo "Please contact linux-ext4@vger.kernel.org for further assistance."
 +	echo "Include $OUT.$DATE, and save $ARCHIVE locally for reference."
 +	unset_vars
@@ -227,14 +226,14 @@ Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
 +		log "Failed to create or find mountpoint...."
 +	else
 +		mount -t $FS_TYPE $MOUNT_OPTS $IMAGE $MNTPT 2>&1 | tee -a $OUT
-+		if [ $? -ne 0 ]; then
-+			log "Unable to mount file system - skipped"
++		if [ ${PIPESTATUS[0]} -ne 0 ]; then
++			log "Error mounting file system - skipped"
 +		else
 +			df -h $MNTPT >> $OUT
 +			df -i $MNTPT >> $OUT
 +			log "Copying data into the test filesystem..."
 +
-+			cp -r ../ $MNTPT >> $OUT 2>&1
++			cp -r ../{.git,lib,misc,e2fsck,po} $MNTPT/ >> $OUT 2>&1
 +			sync
 +			umount -f $MNTPT > /dev/null 2>&1 | tee -a $OUT
 +		fi
@@ -290,7 +289,7 @@ Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
 +
 +if [ "$MOUNT_AFTER_CORRUPTION" = "yes" ]; then
 +	mount -t $FS_TYPE $MOUNT_OPTS $IMAGE $MNTPT 2>&1 | tee -a $OUT
-+	[ $? -ne 0 ] && log "Unable to mount file system - skipped"
++	[ ${PIPESTATUS[0]} -ne 0 ] && log "error mounting file system - skipped"
 +
 +	[ "$REMOVE_FILES" = "yes" ] && rm -rf $MNTPT/* >> $OUT
 +	umount -f $MNTPT > /dev/null 2>&1 | tee -a $OUT
@@ -307,12 +306,12 @@ Index: e2fsprogs-1.41.10/tests/f_random_corruption/script
 +
 +COUNT=$((COUNT + 1))
 +done
-Index: e2fsprogs-1.41.10/tests/Makefile.in
+Index: e2fsprogs-1.41.14/tests/Makefile.in
 ===================================================================
---- e2fsprogs-1.41.10.orig/tests/Makefile.in
-+++ e2fsprogs-1.41.10/tests/Makefile.in
-@@ -27,6 +27,8 @@ mke2fs.conf: $(srcdir)/../misc/mke2fs.co
- 	sed -e 's/blocksize = -1/blocksize = 4096/' $(srcdir)/../misc/mke2fs.conf >mke2fs.conf
+--- e2fsprogs-1.41.14.orig/tests/Makefile.in
++++ e2fsprogs-1.41.14/tests/Makefile.in
+@@ -27,6 +27,8 @@ mke2fs.conf: $(srcdir)/mke2fs.conf.in
+ 	$(CP) $(srcdir)/mke2fs.conf.in mke2fs.conf
  
  check:: test_script
 +	@echo "Removing remnants of earlier tests..."

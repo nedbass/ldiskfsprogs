@@ -36,7 +36,7 @@ Index: e2fsprogs-1.41.4/e2fsck/e2fsck.h
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/e2fsck.h
 +++ e2fsprogs-1.41.4/e2fsck/e2fsck.h
-@@ -186,6 +186,17 @@ struct resource_track {
+@@ -191,6 +191,17 @@ struct resource_track {
  #define E2F_PASS_5	5
  #define E2F_PASS_1B	6
  
@@ -54,7 +54,7 @@ Index: e2fsprogs-1.41.4/e2fsck/e2fsck.h
  /*
   * Define the extended attribute refcount structure
   */
-@@ -340,6 +351,8 @@ struct e2fsck_struct {
+@@ -345,6 +356,8 @@ struct e2fsck_struct {
  	time_t now;
  	time_t time_fudge;	/* For working around buggy init scripts */
  	int ext_attr_ver;
@@ -67,7 +67,7 @@ Index: e2fsprogs-1.41.4/e2fsck/unix.c
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/unix.c
 +++ e2fsprogs-1.41.4/e2fsck/unix.c
-@@ -550,6 +550,49 @@ static void signal_cancel(int sig EXT2FS
+@@ -560,6 +560,49 @@ static void signal_cancel(int sig EXT2FS
  }
  #endif
  
@@ -117,7 +117,7 @@ Index: e2fsprogs-1.41.4/e2fsck/unix.c
  static void parse_extended_opts(e2fsck_t ctx, const char *opts)
  {
  	char	*buf, *token, *next, *p, *arg;
-@@ -585,6 +628,36 @@ static void parse_extended_opts(e2fsck_t
+@@ -595,6 +638,36 @@ static void parse_extended_opts(e2fsck_t
  		} else if (strcmp(token, "fragcheck") == 0) {
  			ctx->options |= E2F_OPT_FRAGCHECK;
  			continue;
@@ -151,19 +151,19 @@ Index: e2fsprogs-1.41.4/e2fsck/unix.c
 +				extended_usage++;
 +				continue;
 +			}
- 		} else {
- 			fprintf(stderr, _("Unknown extended option: %s\n"),
- 				token);
-@@ -600,6 +673,8 @@ static void parse_extended_opts(e2fsck_t
- 		       "Valid extended options are:\n"), stderr);
+ 		} else if (strcmp(token, "journal_only") == 0) {
+ 			if (arg) {
+ 				extended_usage++;
+@@ -617,6 +690,8 @@ static void parse_extended_opts(e2fsck_t
  		fputs(("\tea_ver=<ea_version (1 or 2)>\n"), stderr);
  		fputs(("\tfragcheck\n"), stderr);
+ 		fputs(("\tjournal_only\n"), stderr);
 +		fputs(("\tshared=<preserve|lost+found|delete>\n"), stderr);
 +		fputs(("\tclone=<dup|zero>\n"), stderr);
  		fputc('\n', stderr);
  		exit(1);
  	}
-@@ -662,6 +737,7 @@ static errcode_t PRS(int argc, char *arg
+@@ -679,6 +754,7 @@ static errcode_t PRS(int argc, char *arg
  		config_fn[0] = cp;
  	profile_set_syntax_err_cb(syntax_err_report);
  	profile_init(config_fn, &ctx->profile);
@@ -175,7 +175,7 @@ Index: e2fsprogs-1.41.4/e2fsck/pass1b.c
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/pass1b.c
 +++ e2fsprogs-1.41.4/e2fsck/pass1b.c
-@@ -457,6 +457,9 @@ static void pass1d(e2fsck_t ctx, char *b
+@@ -471,6 +471,9 @@ static void pass1d(e2fsck_t ctx, char *b
  			q = (struct dup_block *) dnode_get(m);
  			if (q->num_bad > 1)
  				file_ok = 0;
@@ -185,7 +185,7 @@ Index: e2fsprogs-1.41.4/e2fsck/pass1b.c
  			if (check_if_fs_block(ctx, s->block)) {
  				file_ok = 0;
  				meta_data = 1;
-@@ -512,13 +515,26 @@ static void pass1d(e2fsck_t ctx, char *b
+@@ -526,13 +529,26 @@ static void pass1d(e2fsck_t ctx, char *b
  			fix_problem(ctx, PR_1D_DUP_BLOCKS_DEALT, &pctx);
  			continue;
  		}
@@ -216,7 +216,7 @@ Index: e2fsprogs-1.41.4/e2fsck/pass1b.c
  		if (fix_problem(ctx, PR_1D_DELETE_QUESTION, &pctx))
  			delete_file(ctx, ino, p, block_buf);
  		else
-@@ -535,7 +551,8 @@ static void decrement_badcount(e2fsck_t 
+@@ -549,7 +565,8 @@ static void decrement_badcount(e2fsck_t 
  {
  	p->num_bad--;
  	if (p->num_bad <= 0 ||
@@ -226,7 +226,7 @@ Index: e2fsprogs-1.41.4/e2fsck/pass1b.c
  		ext2fs_unmark_block_bitmap(ctx->block_dup_map, block);
  }
  
-@@ -677,11 +694,15 @@ static int clone_file_block(ext2_filsys 
+@@ -691,11 +708,15 @@ static int clone_file_block(ext2_filsys 
  			printf("Cloning block %u to %u\n", *block_nr,
  			       new_block);
  #endif
@@ -247,7 +247,7 @@ Index: e2fsprogs-1.41.4/e2fsck/pass1b.c
  			}
  			retval = io_channel_write_blk(fs->io, new_block, 1,
  						      cs->buf);
-@@ -690,6 +711,11 @@ static int clone_file_block(ext2_filsys 
+@@ -704,6 +725,11 @@ static int clone_file_block(ext2_filsys 
  				return BLOCK_ABORT;
  			}
  			decrement_badcount(ctx, *block_nr, p);
@@ -263,7 +263,7 @@ Index: e2fsprogs-1.41.4/e2fsck/problem.h
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/problem.h
 +++ e2fsprogs-1.41.4/e2fsck/problem.h
-@@ -569,6 +569,13 @@ struct problem_context {
+@@ -593,6 +593,13 @@ struct problem_context {
  /* Couldn't clone file (error) */
  #define PR_1D_CLONE_ERROR	0x013008
  
@@ -281,7 +281,7 @@ Index: e2fsprogs-1.41.4/e2fsck/problem.c
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/problem.c
 +++ e2fsprogs-1.41.4/e2fsck/problem.c
-@@ -990,6 +990,14 @@ static struct e2fsck_problem problem_tab
+@@ -1003,6 +1003,14 @@ static struct e2fsck_problem problem_tab
  	{ PR_1D_CLONE_ERROR,
  	  N_("Couldn't clone file: %m\n"), PROMPT_NONE, 0 },
  
@@ -300,7 +300,7 @@ Index: e2fsprogs-1.41.4/e2fsck/e2fsck.8.in
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/e2fsck.8.in
 +++ e2fsprogs-1.41.4/e2fsck/e2fsck.8.in
-@@ -184,6 +184,19 @@ separated, and may take an argument usin
+@@ -180,6 +180,19 @@ separated, and may take an argument usin
  following options are supported:
  .RS 1.2i
  .TP
@@ -324,7 +324,7 @@ Index: e2fsprogs-1.41.4/e2fsck/e2fsck.conf.5.in
 ===================================================================
 --- e2fsprogs-1.41.4.orig/e2fsck/e2fsck.conf.5.in
 +++ e2fsprogs-1.41.4/e2fsck/e2fsck.conf.5.in
-@@ -107,6 +107,19 @@ This boolean relation controls whether o
+@@ -129,6 +129,19 @@ This boolean relation controls whether o
  will offer to clear
  the test_fs flag if the ext4 filesystem is available on the system.  It
  defaults to true.

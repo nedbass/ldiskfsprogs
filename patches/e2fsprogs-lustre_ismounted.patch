@@ -13,7 +13,7 @@ Index: e2fsprogs-1.39/lib/ext2fs/ismounted.c
  
  #include "ext2_fs.h"
  #include "ext2fs.h"
-@@ -276,6 +278,135 @@ static int is_swap_device(const char *fi
+@@ -286,6 +292,135 @@ leave:
  	return ret;
  }
  
@@ -149,7 +149,7 @@ Index: e2fsprogs-1.39/lib/ext2fs/ismounted.c
  
  /*
   * ext2fs_check_mount_point() fills determines if the device is
-@@ -327,6 +458,8 @@ errcode_t ext2fs_check_mount_point(const
+@@ -337,6 +472,8 @@ errcode_t ext2fs_check_mount_point(const
  		close(fd);
  #endif
  

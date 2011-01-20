@@ -1,7 +1,6 @@
 The patch changes the order that the config file and command line are
-parsed so that command line has precedence.  It also adds a check to
-make sure only one -E option is passed on the command line as -E option
-parsing is not cumulative.
+parsed so that command line has precedence.  It also parses the -E
+option for every occurrence, otherwise the -E option is not cumulative.
 
 Signed-off-by: Jim Garlick <garlick@llnl.gov>
 Signed-off-by: Andreas Dilger <adilger@clusterfs.com>

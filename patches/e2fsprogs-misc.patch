@@ -1,5 +1,5 @@
-Fixes a number of compile warnings hit during building e2fsprogs-1.41.12.  A
-few unused variable removals, and signed/unsigned pointers.  The only possibly
+Fixes a number of compile warnings hit during building e2fsprogs.  A few
+unused variable removals, and signed/unsigned pointers.  The only possibly
 controversial fixup is the initialization of rec_len = 0 in copy_dir_entries().
 It wasn't totally obvious to me what to initialize it to (or if it matters),
 but 0 seems reasonable, and is better than random garbage.
@@ -20,19 +20,30 @@ Index: e2fsprogs-1.41.12/lib/blkid/probe.c
  	blkid_set_tag(probe->dev, "LABEL", label, 0);
  	return 0;
  }
-Index: e2fsprogs-1.41.12/lib/ext2fs/csum.c
+Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
 ===================================================================
---- e2fsprogs-1.41.12.orig/lib/ext2fs/csum.c
-+++ e2fsprogs-1.41.12/lib/ext2fs/csum.c
-@@ -166,7 +166,7 @@ void print_csum(const char *msg, ext2_fi
- 	crc2 = ext2fs_crc16(crc1, &swabgroup, sizeof(swabgroup));
- 	crc3 = ext2fs_crc16(crc2, desc,
- 			    offsetof(struct ext2_group_desc, bg_checksum));
--	printf("%s: UUID %016Lx%016Lx(%04x), grp %u(%04x): %04x=%04x\n",
-+	printf("%s: UUID %016llx%016llx(%04x), grp %u(%04x): %04x=%04x\n",
- 	       msg, *(long long *)&sb->s_uuid, *(long long *)&sb->s_uuid[8],
- 	       crc1, group, crc2, crc3, ext2fs_group_desc_csum(fs, group));
- }
+--- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
+@@ -50,6 +50,9 @@ extern "C" {
+ #endif
+ 
+ #include <stdio.h>
++#ifndef _XOPEN_SOURCE
++#define _XOPEN_SOURCE 600	/* for posix_memalign() */
++#endif
+ #include <stdlib.h>
+ #include <string.h>
+ #include <errno.h>
+@@ -1268,7 +1268,8 @@ _INLINE_ errcode_t ext2fs_get_memalign(u
+ 
+ 	if (align == 0)
+ 		align = 8;
+-	if (retval = posix_memalign((void **) ptr, align, size)) {
++	retval = posix_memalign((void **)ptr, align, size);
++	if (retval != 0) {
+ 		if (retval == ENOMEM)
+ 			return EXT2_ET_NO_MEMORY;
+ 		return retval;
 Index: e2fsprogs-1.41.12/misc/tune2fs.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/misc/tune2fs.c
@@ -85,6 +96,20 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  	if (extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) {
  		/* extent mapped */
  		if  (ext2fs_bmap(ctx->fs, pctx->ino, inode, 0, 0, 0,
+Index: e2fsprogs-1.41.14/e2fsck/pass2.c
+===================================================================
+--- e2fsprogs-1.41.14.orig/e2fsck/pass2.c
++++ e2fsprogs-1.41.14/e2fsck/pass2.c
+@@ -404,7 +404,8 @@ static int check_dotdot(e2fsck_t ctx,
+ 			struct ext2_dir_entry *dirent,
+ 			ext2_ino_t ino, struct problem_context *pctx)
+ {
+-	int	rec_len, problem = 0;
++	int		problem = 0;
++	unsigned int	rec_len;
+ 
+ 	if (!dirent->inode)
+ 		problem = PR_2_MISSING_DOT_DOT;
 Index: e2fsprogs-1.41.12/e2fsck/rehash.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/rehash.c
@@ -118,3 +143,18 @@ Index: e2fsprogs-1.41.12/e2fsck/Makefile.in
  
  tst_crc32: $(srcdir)/crc32.c $(LIBEXT2FS) $(DEPLIBCOM_ERR)
  	$(Q) $(CC) $(BUILD_LDFLAGS) $(ALL_CFLAGS) -o tst_crc32 $(srcdir)/crc32.c \
+Index: e2fsprogs-1.41.4/misc/tune2fs.8.in
+===================================================================
+--- e2fsprogs-1.41.4.orig/misc/tune2fs.8.in
++++ e2fsprogs-1.41.4/misc/tune2fs.8.in
+@@ -430,6 +430,10 @@ set this feature automatically when a fi
+ .B dir_index
+ Use hashed b-trees to speed up lookups in large directories.
+ .TP
++.B dir_nlink
++Allow directories to have more than 65000 subdirectories (read-only
++compatible).
++.TP
+ .B filetype
+ Store file type information in directory entries.
+ .TP

@@ -29,7 +29,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  #ifdef HAVE_UNISTD_H
  #include <unistd.h>
  #endif
-@@ -202,6 +203,18 @@ typedef enum {
+@@ -203,6 +204,18 @@ typedef enum {
  	E2F_CLONE_ZERO
  } clone_opt_t;
  
@@ -48,7 +48,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  /*
   * Define the extended attribute refcount structure
   */
-@@ -238,7 +251,6 @@ struct e2fsck_struct {
+@@ -239,7 +252,6 @@ struct e2fsck_struct {
  			unsigned long max);
  
  	ext2fs_inode_bitmap inode_used_map; /* Inodes which are in use */
@@ -56,7 +56,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  	ext2fs_inode_bitmap inode_dir_map; /* Inodes which are directories */
  	ext2fs_inode_bitmap inode_bb_map; /* Inodes which are in bad blocks */
  	ext2fs_inode_bitmap inode_imagic_map; /* AFS inodes */
-@@ -253,6 +265,8 @@ struct e2fsck_struct {
+@@ -254,6 +266,8 @@ struct e2fsck_struct {
  	 */
  	ext2_icount_t	inode_count;
  	ext2_icount_t inode_link_info;
@@ -65,7 +65,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  
  	ext2_refcount_t	refcount;
  	ext2_refcount_t refcount_extra;
-@@ -355,6 +369,7 @@ struct e2fsck_struct {
+@@ -356,6 +370,7 @@ struct e2fsck_struct {
  	/* misc fields */
  	time_t now;
  	time_t time_fudge;	/* For working around buggy init scripts */
@@ -73,7 +73,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
  	int ext_attr_ver;
  	shared_opt_t shared;
  	clone_opt_t clone;
-@@ -471,6 +486,11 @@ extern int e2fsck_pass1_check_symlink(ex
+@@ -472,6 +487,11 @@ extern int e2fsck_pass1_check_symlink(ex
  extern void e2fsck_clear_inode(e2fsck_t ctx, ext2_ino_t ino,
  			       struct ext2_inode *inode, int restart_flag,
  			       const char *source);
@@ -136,8 +136,8 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  	}
  
 +	if (EXT4_FITS_IN_INODE(inode, inode, i_crtime) &&
-+	    inode->i_crtime < sb->s_mkfs_time ||
-+	    inode->i_crtime > ctx->now + ctx->now_tolerance)
++	    (inode->i_crtime < sb->s_mkfs_time ||
++	     inode->i_crtime > ctx->now + ctx->now_tolerance))
 +		e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_HIGH);
 +
  	eamagic = IHDR(inode);
@@ -245,7 +245,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		if (!(inode->i_flags & EXT4_EXTENTS_FL)) {
  			if (inode->i_block[EXT2_IND_BLOCK])
  				ctx->fs_ind_count++;
-@@ -1443,28 +1468,31 @@ static EXT2_QSORT_TYPE process_inode_cmp
+@@ -1443,28 +1470,31 @@ static EXT2_QSORT_TYPE process_inode_cmp
  }
  
  /*
@@ -289,7 +289,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  
  /*
   * This procedure will allocate the inode "bb" (badblock) map table
-@@ -1621,7 +1649,8 @@ static int check_ext_attr(e2fsck_t ctx, 
+@@ -1621,7 +1651,8 @@ static int check_ext_attr(e2fsck_t ctx, 
  	if (!(fs->super->s_feature_compat & EXT2_FEATURE_COMPAT_EXT_ATTR) ||
  	    (blk < fs->super->s_first_data_block) ||
  	    (blk >= fs->super->s_blocks_count)) {
@@ -299,7 +299,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		return 0;
  	}
  
-@@ -1787,9 +1816,11 @@ static int handle_htree(e2fsck_t ctx, st
+@@ -1787,9 +1818,11 @@ static int handle_htree(e2fsck_t ctx, st
  
  	if ((!LINUX_S_ISDIR(inode->i_mode) &&
  	     fix_problem(ctx, PR_1_HTREE_NODIR, pctx)) ||
@@ -314,7 +314,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  
  	pctx->errcode = ext2fs_bmap(fs, ino, inode, 0, 0, 0, &blk);
  
-@@ -1797,6 +1828,7 @@ static int handle_htree(e2fsck_t ctx, st
+@@ -1797,6 +1830,7 @@ static int handle_htree(e2fsck_t ctx, st
  	    (blk == 0) ||
  	    (blk < fs->super->s_first_data_block) ||
  	    (blk >= fs->super->s_blocks_count)) {
@@ -322,7 +322,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		if (fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
  			return 1;
  		else
-@@ -1804,8 +1836,11 @@ static int handle_htree(e2fsck_t ctx, st
+@@ -1804,8 +1838,11 @@ static int handle_htree(e2fsck_t ctx, st
  	}
  
  	retval = io_channel_read_blk(fs->io, blk, 1, block_buf);
@@ -336,7 +336,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  
  	/* XXX should check that beginning matches a directory */
  	root = (struct ext2_dx_root_info *) (block_buf + 24);
-@@ -1846,8 +1881,8 @@ void e2fsck_clear_inode(e2fsck_t ctx, ex
+@@ -1846,8 +1883,8 @@ void e2fsck_clear_inode(e2fsck_t ctx, ex
  	ext2fs_unmark_inode_bitmap(ctx->inode_used_map, ino);
  	if (ctx->inode_reg_map)
  		ext2fs_unmark_inode_bitmap(ctx->inode_reg_map, ino);
@@ -347,7 +347,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  
  	/*
  	 * If the inode was partially accounted for before processing
-@@ -1919,6 +1954,11 @@ static void scan_extent_node(e2fsck_t ct
+@@ -1919,6 +1956,11 @@ static void scan_extent_node(e2fsck_t ct
  			problem = PR_1_EXTENT_ENDS_BEYOND;
  
  		if (problem) {
@@ -359,7 +359,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		report_problem:
  			pctx->blk = extent.e_pblk;
  			pctx->blk2 = extent.e_lblk;
-@@ -2120,6 +2160,7 @@ static void check_blocks(e2fsck_t ctx, s
+@@ -2120,6 +2162,7 @@ static void check_blocks(e2fsck_t ctx, s
  		    EXT2_FEATURE_INCOMPAT_COMPRESSION)
  			pb.compressed = 1;
  		else {
@@ -367,7 +367,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  			if (fix_problem(ctx, PR_1_COMPR_SET, pctx)) {
  				inode->i_flags &= ~EXT2_COMPRBLK_FL;
  				dirty_inode++;
-@@ -2173,6 +2214,11 @@ static void check_blocks(e2fsck_t ctx, s
+@@ -2173,6 +2216,11 @@ static void check_blocks(e2fsck_t ctx, s
  	}
  
  	if (!pb.num_blocks && pb.is_dir) {
@@ -379,7 +379,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		if (fix_problem(ctx, PR_1_ZERO_LENGTH_DIR, pctx)) {
  			e2fsck_clear_inode(ctx, ino, inode, 0, "check_blocks");
  			ctx->fs_directory_count--;
-@@ -2238,6 +2284,7 @@ static void check_blocks(e2fsck_t ctx, s
+@@ -2238,6 +2286,7 @@ static void check_blocks(e2fsck_t ctx, s
  	if (bad_size && !LINUX_S_ISLNK(inode->i_mode)) {
  		pctx->num = (pb.last_block+1) * fs->blocksize;
  		pctx->group = bad_size;
@@ -387,7 +387,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		if (fix_problem(ctx, PR_1_BAD_I_SIZE, pctx)) {
  			inode->i_size = pctx->num;
  			if (!LINUX_S_ISDIR(inode->i_mode))
-@@ -2254,6 +2301,7 @@ static void check_blocks(e2fsck_t ctx, s
+@@ -2254,6 +2303,7 @@ static void check_blocks(e2fsck_t ctx, s
  	     (inode->i_flags & EXT4_HUGE_FILE_FL) &&
  	     (inode->osd2.linux2.l_i_blocks_hi != 0))) {
  		pctx->num = pb.num_blocks;
@@ -395,7 +395,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
  		if (fix_problem(ctx, PR_1_BAD_I_BLOCKS, pctx)) {
  			inode->i_blocks = pb.num_blocks;
  			inode->osd2.linux2.l_i_blocks_hi = 0;
-@@ -2410,8 +2458,10 @@ static int process_block(ext2_filsys fs,
+@@ -2410,8 +2460,10 @@ static int process_block(ext2_filsys fs,
  		problem = PR_1_TOOBIG_SYMLINK;
  
  	if (blk < fs->super->s_first_data_block ||
@@ -662,7 +662,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass4.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/pass4.c
 +++ e2fsprogs-1.41.12/e2fsck/pass4.c
-@@ -179,6 +179,7 @@ void e2fsck_pass4(e2fsck_t ctx)
+@@ -181,6 +181,7 @@ void e2fsck_pass4(e2fsck_t ctx)
  	}
  	ext2fs_free_icount(ctx->inode_link_info); ctx->inode_link_info = 0;
  	ext2fs_free_icount(ctx->inode_count); ctx->inode_count = 0;
@@ -732,26 +732,26 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/unix.c
 +++ e2fsprogs-1.41.12/e2fsck/unix.c
-@@ -670,6 +670,18 @@ static void parse_extended_opts(e2fsck_t
+@@ -674,6 +674,18 @@ static void parse_extended_opts(e2fsck_t
  				extended_usage++;
  				continue;
  			}
 +		/* -E inode_badness_threshold=<value> */
-+ 		} else if (strcmp(token, "inode_badness_threshold") == 0) {
-+ 			if (!arg) {
-+ 				extended_usage++;
-+ 				continue;
-+ 			}
-+ 			ctx->inode_badness_threshold = strtoul(arg, &p, 0);
++		} else if (strcmp(token, "inode_badness_threshold") == 0) {
++			if (!arg) {
++				extended_usage++;
++				continue;
++			}
++			ctx->inode_badness_threshold = strtoul(arg, &p, 0);
 +			if (*p != '\0' || (ctx->inode_badness_threshold > 200)){
 +				fprintf(stderr, _("Invalid badness value.\n"));
 +				extended_usage++;
 +				continue;
 +			}
- 		} else {
- 			fprintf(stderr, _("Unknown extended option: %s\n"),
- 				token);
-@@ -688,6 +700,7 @@ static void parse_extended_opts(e2fsck_t
+ 		} else if (strcmp(token, "journal_only") == 0) {
+ 			if (arg) {
+ 				extended_usage++;
+@@ -699,6 +711,7 @@ static void parse_extended_opts(e2fsck_t
  		fputs(("\tshared=<preserve|lost+found|delete>\n"), stderr);
  		fputs(("\tclone=<dup|zero>\n"), stderr);
  		fputs(("\texpand_extra_isize\n"), stderr);
@@ -759,7 +759,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
  		fputc('\n', stderr);
  		exit(1);
  	}
-@@ -752,6 +765,9 @@ static errcode_t PRS(int argc, char *arg
+@@ -763,6 +776,9 @@ static errcode_t PRS(int argc, char *arg
  	profile_init(config_fn, &ctx->profile);
  	initialize_profile_options(ctx);
  
@@ -788,9 +788,9 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.8.in
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/e2fsck.8.in
 +++ e2fsprogs-1.41.12/e2fsck/e2fsck.8.in
-@@ -199,6 +199,15 @@ Set the version of the extended attribut
- will require while checking the filesystem.  The version number may 
- be 1 or 2.  The default extended attribute version format is 2.
+@@ -203,6 +203,15 @@ be 1 or 2.  The default extended attribu
+ Only replay the journal if required, but do not perform any further checks
+ or repairs.
  .TP
 +.BI inode_badness_threshold= threshold_value
 +A badness counter is associated with every inode, which determines the degree
@@ -808,7 +808,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
 +++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
-@@ -985,6 +985,7 @@ extern errcode_t ext2fs_initialize(const
+@@ -987,6 +987,7 @@ extern errcode_t ext2fs_initialize(const
  
  /* icount.c */
  extern void ext2fs_free_icount(ext2_icount_t icount);

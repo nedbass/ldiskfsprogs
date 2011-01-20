@@ -112,19 +112,19 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
 +
 +_INLINE_ struct ext2_dx_root_info* get_ext2_dx_root_info(ext2_filsys fs, char *buf)
 +{
-+        struct ext2_dir_entry_2 * de = (struct ext2_dir_entry_2 *) buf;
++	struct ext2_dir_entry_2 * de = (struct ext2_dir_entry_2 *) buf;
 +
-+        if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA))
-+                return (struct ext2_dx_root_info *)(buf +
++	if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA))
++		return (struct ext2_dx_root_info *)(buf +
 +			 __EXT2_DIR_REC_LEN(1) +__EXT2_DIR_REC_LEN(2));
 +
-+        /* get dotdot first */
-+        de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
++	/* get dotdot first */
++	de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
 +
-+        /* dx root info is after dotdot entry */
-+        de = (struct ext2_dir_entry_2 *)((char *)de + EXT2_DIR_REC_LEN(de));
++	/* dx root info is after dotdot entry */
++	de = (struct ext2_dir_entry_2 *)((char *)de + EXT2_DIR_REC_LEN(de));
 +
-+        return (struct ext2_dx_root_info*) de;
++	return (struct ext2_dx_root_info*) de;
 +}
 +
  #undef _INLINE_
@@ -281,9 +281,9 @@ Index: e2fsprogs-1.41.12/e2fsck/pass2.c
  	else if (dirent->name[1] != '\0')
  		problem = PR_2_DOT_NULL_TERM;
  
-+        dir_data_error = e2fsck_check_dirent_data(ctx,
-+                               (struct ext2_dir_entry_2 *)dirent,
-+                               offset, pctx);
++	dir_data_error = e2fsck_check_dirent_data(ctx,
++				(struct ext2_dir_entry_2 *)dirent,
++		    		offset, pctx);
 +
  	(void) ext2fs_get_rec_len(ctx->fs, dirent, &rec_len);
  	if (problem) {
@@ -302,7 +302,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass2.c
  		new_len = rec_len - 12;
  		if (new_len > 12) {
  			if (created ||
-@@ -396,10 +470,11 @@ static int check_dot(e2fsck_t ctx,
+@@ -396,11 +470,12 @@ static int check_dot(e2fsck_t ctx,
   * here; this gets done in pass 3.
   */
  static int check_dotdot(e2fsck_t ctx,
@@ -310,8 +310,9 @@ Index: e2fsprogs-1.41.12/e2fsck/pass2.c
 +			struct ext2_dir_entry *dirent, unsigned int offset,
  			ext2_ino_t ino, struct problem_context *pctx)
  {
- 	int	rec_len, problem = 0;
-+	int     dir_data_error;
+ 	int		problem = 0;
+ 	unsigned int	rec_len;
++	int     	dir_data_error;
  
  	if (!dirent->inode)
  		problem = PR_2_MISSING_DOT_DOT;
@@ -319,9 +320,9 @@ Index: e2fsprogs-1.41.12/e2fsck/pass2.c
  	else if (dirent->name[2] != '\0')
  		problem = PR_2_DOT_DOT_NULL_TERM;
  
-+        dir_data_error = e2fsck_check_dirent_data(ctx,
-+                                (struct ext2_dir_entry_2 *)dirent,
-+                                offset, pctx);
++	dir_data_error = e2fsck_check_dirent_data(ctx,
++				(struct ext2_dir_entry_2 *)dirent,
++				offset, pctx);
 +
  	(void) ext2fs_get_rec_len(ctx->fs, dirent, &rec_len);
  	if (problem) {
@@ -445,10 +446,10 @@ Index: e2fsprogs-1.41.12/e2fsck/problem.c
  	  N_("@i %i is badly corrupt (badness value = %N).  "),
  	  PROMPT_CLEAR, PR_PREEN_OK },
  
-+        /* Directory dirdata flag set */
-+        { PR_2_CLEAR_DIRDATA,
-+          N_("@E dirdata length set incorrectly.\n"),
-+          PROMPT_CLEAR, PR_PREEN_OK },
++	/* Directory dirdata flag set */
++	{ PR_2_CLEAR_DIRDATA,
++	  N_("@E dirdata length set incorrectly.\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK },
 +
  	/* Pass 3 errors */
  
@@ -547,24 +548,24 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/dirblock.c
 +
 +int ext2_get_dirent_dirdata_size(struct ext2_dir_entry_2 *de, char dirdata_flags)
 +{
-+        char *len = de->name + de->name_len + 1 /* NUL terminator */;
-+        int dlen = 0;
-+        __u8 extra_data_flags = (de->file_type & ~EXT2_FT_MASK) >> 4;
++	char *len = de->name + de->name_len + 1 /* NUL terminator */;
++	int dlen = 0;
++	__u8 extra_data_flags = (de->file_type & ~EXT2_FT_MASK) >> 4;
 +
-+        dirdata_flags >>= 4;
-+        while ((extra_data_flags & dirdata_flags) != 0) {
-+                if (extra_data_flags & 1) {
-+                        if (dirdata_flags & 1)
-+                                dlen += *len;
++	dirdata_flags >>= 4;
++	while ((extra_data_flags & dirdata_flags) != 0) {
++		if (extra_data_flags & 1) {
++			if (dirdata_flags & 1)
++				dlen += *len;
 +
-+                        len += *len;
-+                }
-+                extra_data_flags >>= 1;
-+                dirdata_flags >>= 1;
-+        }
++			len += *len;
++		}
++		extra_data_flags >>= 1;
++		dirdata_flags >>= 1;
++	}
 +
-+        /* add NUL terminator byte to dirdata length */
-+        return dlen + (dlen != 0);
++	/* add NUL terminator byte to dirdata length */
++	return dlen + (dlen != 0);
 +}
 +
  errcode_t ext2fs_read_dir_block2(ext2_filsys fs, blk_t block,

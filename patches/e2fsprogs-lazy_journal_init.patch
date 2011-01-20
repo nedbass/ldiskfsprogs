@@ -2,7 +2,7 @@ Index: e2fsprogs-1.41.9/lib/ext2fs/ext2fs.h
 ===================================================================
 --- e2fsprogs-1.41.9.orig/lib/ext2fs/ext2fs.h
 +++ e2fsprogs-1.41.9/lib/ext2fs/ext2fs.h
-@@ -181,10 +181,9 @@ typedef struct ext2_file *ext2_file_t;
+@@ -183,10 +183,9 @@ typedef struct ext2_file *ext2_file_t;
  
  /*
   * Flags for mkjournal
@@ -28,16 +28,16 @@ Index: e2fsprogs-1.41.9/lib/ext2fs/mkjournal.c
  	}
  
  	/* Write the superblock out */
-@@ -116,6 +116,9 @@ static errcode_t write_journal_file(ext2
- 	if (ret_size != (int) fs->blocksize)
+@@ -117,6 +117,9 @@ static errcode_t write_journal_file(ext2
  		goto errout;
  	memset(buf, 0, fs->blocksize);
-+
+ 
 +	if (flags & EXT2_MKJOURNAL_LAZYINIT)
 +		goto success;
- 
- 	for (i = 1; i < size; i++) {
++
+ 	for (i = 1; i < blocks; i++) {
  		ret_size = write(fd, buf, fs->blocksize);
+ 		if (ret_size < 0) {
 @@ -126,10 +129,12 @@ static errcode_t write_journal_file(ext2
  		if (ret_size != (int) fs->blocksize)
  			goto errout;
@@ -69,7 +69,7 @@ Index: e2fsprogs-1.41.9/lib/ext2fs/mkjournal.c
  		if (es->zero_count) {
  			if ((es->blk_to_zero + es->zero_count == new_blk) &&
  			    (es->zero_count < 1024))
-@@ -297,6 +302,7 @@ static errcode_t write_journal_inode(ext
+@@ -297,6 +303,7 @@ static errcode_t write_journal_inode(ext
  	es.newblocks = 0;
  	es.buf = buf;
  	es.err = 0;
@@ -77,20 +77,20 @@ Index: e2fsprogs-1.41.9/lib/ext2fs/mkjournal.c
  	es.zero_count = 0;
  
  	if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS) {
-@@ -495,6 +496,13 @@ errcode_t ext2fs_add_journal_inode(ext2_
- 		/* Create the journal file */
+@@ -497,6 +504,13 @@ errcode_t ext2fs_add_journal_inode(ext2_
  		if ((fd = open(jfile, O_CREAT|O_WRONLY, 0600)) < 0)
  			return errno;
-+
+ 
 +		/* Note that we can't do lazy journal initialization for mounted
 +		 * filesystems, since the zero writing is also allocating the
 +		 * journal blocks.  We could use fallocate, but not all kernels
 +		 * support that, and creating a journal on a mounted ext2
 +		 * filesystems is extremely rare these days...  Skip it. */
 +		flags &= ~EXT2_MKJOURNAL_LAZYINIT;
- 
- 		if ((retval = write_journal_file(fs, jfile, size, flags)))
++
+ 		if ((retval = write_journal_file(fs, jfile, blocks, flags)))
  			goto errout;
+ 
 Index: e2fsprogs-1.41.9/misc/mke2fs.8.in
 ===================================================================
 --- e2fsprogs-1.41.9.orig/misc/mke2fs.8.in
@@ -116,7 +116,7 @@ Index: e2fsprogs-1.41.9/misc/mke2fs.c
 ===================================================================
 --- e2fsprogs-1.41.9.orig/misc/mke2fs.c
 +++ e2fsprogs-1.41.9/misc/mke2fs.c
-@@ -551,6 +551,10 @@ static void create_journal_dev(ext2_fils
+@@ -555,6 +555,10 @@ static void create_journal_dev(ext2_fils
  			_("while initializing journal superblock"));
  		exit(1);
  	}
@@ -127,7 +127,7 @@ Index: e2fsprogs-1.41.9/misc/mke2fs.c
  	if (quiet)
  		memset(&progress, 0, sizeof(progress));
  	else
-@@ -578,6 +582,8 @@ static void create_journal_dev(ext2_fils
+@@ -582,6 +586,8 @@ static void create_journal_dev(ext2_fils
  	}
  	ext2fs_zero_blocks(0, 0, 0, 0, 0);
  
@@ -136,7 +136,7 @@ Index: e2fsprogs-1.41.9/misc/mke2fs.c
  	retval = io_channel_write_blk(fs->io,
  				      fs->super->s_first_data_block+1,
  				      1, buf);
-@@ -586,7 +592,6 @@ static void create_journal_dev(ext2_fils
+@@ -590,7 +596,6 @@ static void create_journal_dev(ext2_fils
  			_("while writing journal superblock"));
  		exit(1);
  	}
@@ -144,7 +144,7 @@ Index: e2fsprogs-1.41.9/misc/mke2fs.c
  }
  
  static void show_stats(ext2_filsys fs)
-@@ -795,6 +800,12 @@ static void parse_extended_opts(struct e
+@@ -801,6 +806,12 @@ static void parse_extended_opts(struct e
  			}
  		} else if (!strcmp(token, "test_fs")) {
  			param->s_flags |= EXT2_FLAGS_TEST_FILESYS;
@@ -157,21 +157,21 @@ Index: e2fsprogs-1.41.9/misc/mke2fs.c
  		} else if (!strcmp(token, "lazy_itable_init")) {
  			if (arg)
  				lazy_itable_init = strtoul(arg, &p, 0);
-@@ -815,6 +826,7 @@ static void parse_extended_opts(struct e
+@@ -825,6 +836,7 @@ static void parse_extended_opts(struct e
  			"\tstripe-width=<RAID stride * data disks in blocks>\n"
  			"\tresize=<resize maximum size in blocks>\n"
  			"\tlazy_itable_init=<0 to disable, 1 to enable>\n"
 +			"\tlazy_journal_init=<0 to disable, 1 to enable>\n"
- 			"\ttest_fs\n\n"),
- 			badopt ? badopt : "");
- 		free(buf);
-@@ -1637,6 +1649,9 @@ got_size:
- 
+ 			"\ttest_fs\n"
+ 			"\tdiscard\n"
+ 			"\tnodiscard\n\n"),
+@@ -1787,6 +1799,9 @@ got_size:
  	lazy_itable_init = get_bool_from_profile(fs_types,
- 						 "lazy_itable_init", 0);
+ 						 "lazy_itable_init",
+ 						 lazy_itable_init);
 +	journal_flags |= get_bool_from_profile(fs_types,
 +					       "lazy_journal_init", 0) ?
 +						EXT2_MKJOURNAL_LAZYINIT : 0;
+ 	discard = get_bool_from_profile(fs_types, "discard" , discard);
  
  	/* Get options from profile */
- 	for (cpp = fs_types; *cpp; cpp++) {

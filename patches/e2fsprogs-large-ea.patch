@@ -312,32 +312,29 @@ Index: e2fsprogs-1.41.12/e2fsck/problem.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/problem.c
 +++ e2fsprogs-1.41.12/e2fsck/problem.c
-@@ -964,6 +964,30 @@ static struct e2fsck_problem problem_tab
+@@ -964,6 +964,27 @@ static struct e2fsck_problem problem_tab
  	     "without deletion of an EA.\n"),
  	  PROMPT_FIX, 0 },
  
-+	/* Inode has illegal EA value inode */
++	/* Inode has illegal extended attribute value inode */
 +	{ PR_1_ATTR_VALUE_EA_INODE,
-+	  N_("@i %i has illegal @I EA value @i %N.\n"),
++	  N_("@i %i has @I @a value @i %N.\n"),
 +	  PROMPT_FIX, PR_PREEN_OK },
 +
-+	/* Invalid backpointer from EA inode to parent inode */
++	/* Invalid backpointer from extended attribute inode to parent inode */
 +	{ PR_1_ATTR_INVAL_EA_INODE,
-+	  N_("@I invalid backpointer from EA @i %N to parent @i %i. "
-+	     "Delete EA inode?\n"),
-+	  PROMPT_FIX, PR_PREEN_OK },
++	  N_("@n backpointer from @a @i %N to parent @i %i.\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK },
 +
-+	/* Parent inode has invalid EA entry. EA inode does not have
-+	 * EXT4_EA_INODE_FL flag */
++	/* Inode has invalid extended attribute. EA inode missing
++	 * EA_INODE flag. */
 +	{ PR_1_ATTR_NO_EA_INODE_FL,
-+	  N_("Parent @i %i has @I EA entry. EA @i %N does not have "
-+	     "EXT4_EA_INODE_FL flag. Delete EA entry?\n"),
-+	  PROMPT_FIX, PR_PREEN_OK },
++	  N_("@i %i has @n @a. EA @i %N missing EA_INODE flag.\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK },
 +
-+	/* EA inode for parent inode does not have EXT4_EA_INODE_FL flag */
++	/* EA inode for parent inode missing EA_INODE flag. */
 +	{ PR_1_ATTR_SET_EA_INODE_FL,
-+	  N_("EA @i %N for parent @i %i does not have EXT4_EA_INODE_FL flag. "
-+	     "Set the flag?\n"),
++	  N_("EA @i %N for parent @i %i missing EA_INODE flag.\n"),
 +	  PROMPT_FIX, PR_PREEN_OK },
 +
  
@@ -354,11 +351,11 @@ Index: e2fsprogs-1.41.12/e2fsck/problem.h
 +/* Inode has illegal EA value inode */
 +#define PR_1_ATTR_VALUE_EA_INODE	0x01006D
 +
-+/* Invalid back-pointer from EA-inode to parent inode */
++/* Invalid backpointer from EA inode to parent inode */
 +#define PR_1_ATTR_INVAL_EA_INODE	0x01006E
 +
 +/* Parent inode has invalid EA entry. EA inode does not have
-+ * EXT4_EA_INODE_FL flag */
++ * EXT4_EA_INODE_FL flag. Delete EA entry? */
 +#define PR_1_ATTR_NO_EA_INODE_FL	0x01006F
 +
 +/* EA inode for parent inode does not have EXT4_EA_INODE_FL flag */

@@ -5,7 +5,7 @@ FILES
 ^core
 *~
 .pc
-patches
+configure
 Makefile
 *.o
 MCONFIG

@@ -32,7 +32,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2_fs.h
 +++ e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
-@@ -588,7 +588,7 @@ struct ext2_super_block {
+@@ -594,7 +594,7 @@ struct ext2_super_block {
  	__u16	s_want_extra_isize; 	/* New inodes should reserve # bytes */
  	__u32	s_flags;		/* Miscellaneous flags */
  	__u16   s_raid_stride;		/* RAID stride */
@@ -41,7 +41,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
  	__u64   s_mmp_block;            /* Block for multi-mount protection */
  	__u32   s_raid_stripe_width;    /* blocks on all data disks (N*stride)*/
  	__u8	s_log_groups_per_flex;	/* FLEX_BG group size */
-@@ -671,7 +671,8 @@ struct ext2_super_block {
+@@ -693,7 +693,8 @@ struct ext2_super_block {
  
  
  #define EXT2_FEATURE_COMPAT_SUPP	0
@@ -51,7 +51,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2_fs.h
  #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
  					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
  					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
-@@ -751,26 +752,34 @@ struct ext2_dir_entry_2 {
+@@ -777,26 +778,34 @@ struct ext2_dir_entry_2 {
  /*
   * This structure will be used for multiple mount protection. It will be
   * written into the block number saved in the s_mmp_block field in the
@@ -104,16 +104,15 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/ext2fs/ext2fs.h
 +++ e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
-@@ -172,6 +172,8 @@ typedef struct ext2_file *ext2_file_t;
+@@ -173,6 +173,7 @@ typedef struct ext2_file *ext2_file_t;
  #define EXT2_FLAG_EXCLUSIVE		0x4000
  #define EXT2_FLAG_SOFTSUPP_FEATURES	0x8000
  #define EXT2_FLAG_NOFREE_ON_ERROR	0x10000
 +#define EXT2_FLAG_SKIP_MMP		0x20000
-+
+ #define EXT2_FLAG_DIRECT_IO		0x80000
  
  /*
-  * Special flag in the ext2 inode i_flag field that means that this is
-@@ -186,6 +188,15 @@ typedef struct ext2_file *ext2_file_t;
+@@ -187,6 +188,15 @@ typedef struct ext2_file *ext2_file_t;
  #define EXT2_MKJOURNAL_V1_SUPER	0x0000001 /* create V1 superblock (deprecated) */
  #define EXT2_MKJOURNAL_LAZYINIT	0x0000002 /* don't zero journal inode before use*/
  
@@ -129,7 +128,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  struct struct_ext2_filsys {
  	errcode_t			magic;
  	io_channel			io;
-@@ -231,6 +242,19 @@ struct struct_ext2_filsys {
+@@ -232,6 +242,19 @@ struct struct_ext2_filsys {
  	io_channel			image_io;
  
  	/*
@@ -149,7 +148,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  	 * More callback functions
  	 */
  	errcode_t (*get_alloc_block)(ext2_filsys fs, blk64_t goal,
-@@ -528,14 +552,16 @@ typedef struct ext2_icount *ext2_icount_
+@@ -529,14 +552,16 @@ typedef struct ext2_icount *ext2_icount_
  					 EXT2_FEATURE_INCOMPAT_META_BG|\
  					 EXT3_FEATURE_INCOMPAT_RECOVER|\
  					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
@@ -168,7 +167,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  #endif
  #define EXT2_LIB_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER|\
  					 EXT4_FEATURE_RO_COMPAT_HUGE_FILE|\
-@@ -1113,6 +1139,16 @@ errcode_t ext2fs_link(ext2_filsys fs, ex
+@@ -1114,6 +1139,16 @@ errcode_t ext2fs_link(ext2_filsys fs, ex
  errcode_t ext2fs_unlink(ext2_filsys fs, ext2_ino_t dir, const char *name,
  			ext2_ino_t ino, int flags);
  
@@ -185,7 +184,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  /* read_bb.c */
  extern errcode_t ext2fs_read_bb_inode(ext2_filsys fs,
  				      ext2_badblocks_list *bb_list);
-@@ -1150,6 +1186,7 @@ extern void ext2fs_swap_inode_full(ext2_
+@@ -1148,6 +1183,7 @@ extern void ext2fs_swap_inode_full(ext2_
  				   int bufsize);
  extern void ext2fs_swap_inode(ext2_filsys fs,struct ext2_inode *t,
  			      struct ext2_inode *f, int hostorder);
@@ -193,6 +192,19 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/ext2fs.h
  
  /* valid_blk.c */
  extern int ext2fs_inode_has_valid_blocks(struct ext2_inode *inode);
+Index: e2fsprogs-1.41.14/lib/ext2fs/tst_super_size.c
+===================================================================
+--- e2fsprogs-1.41.14.orig/lib/ext2fs/tst_super_size.c
++++ e2fsprogs-1.41.14/lib/ext2fs/tst_super_size.c
+@@ -100,7 +100,7 @@ void check_superblock_fields()
+ 	check_field(s_want_extra_isize);
+ 	check_field(s_flags);
+ 	check_field(s_raid_stride);
+-	check_field(s_mmp_interval);
++	check_field(s_mmp_update_interval);
+ 	check_field(s_mmp_block);
+ 	check_field(s_raid_stripe_width);
+ 	check_field(s_log_groups_per_flex);
 Index: e2fsprogs-1.41.12/misc/tune2fs.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/misc/tune2fs.c
@@ -553,7 +565,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		} else if (strcmp(token, "stride") == 0) {
  			if (!arg) {
  				r_usage++;
-@@ -988,15 +1089,18 @@ static void parse_extended_opts(ext2_fil
+@@ -1000,15 +1101,18 @@ static void parse_extended_opts(ext2_fil
  			"and may take an argument which\n"
  			"\tis set off by an equals ('=') sign.\n\n"
  			"Valid extended options are:\n"
@@ -573,7 +585,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  }
  
  /*
-@@ -1575,6 +1679,7 @@ int main(int argc, char **argv)
+@@ -1587,6 +1691,7 @@ int main(int argc, char **argv)
  	ext2_filsys fs;
  	struct ext2_super_block *sb;
  	io_manager io_ptr, io_ptr_orig = NULL;
@@ -581,7 +593,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  
  #ifdef ENABLE_NLS
  	setlocale(LC_MESSAGES, "");
-@@ -1604,14 +1709,26 @@ int main(int argc, char **argv)
+@@ -1616,14 +1721,26 @@ int main(int argc, char **argv)
  		io_ptr = unix_io_manager;
  
  retry_open:
@@ -612,7 +624,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		exit(1);
  	}
  
-@@ -1624,12 +1741,14 @@ retry_open:
+@@ -1636,12 +1753,14 @@ retry_open:
  		if (new_inode_size == EXT2_INODE_SIZE(fs->super)) {
  			fprintf(stderr, _("The inode size is already %lu\n"),
  				new_inode_size);
@@ -629,7 +641,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		}
  
  		/*
-@@ -1638,8 +1757,10 @@ retry_open:
+@@ -1650,8 +1769,10 @@ retry_open:
  		 */
  		io_ptr_orig = io_ptr;
  		retval = tune2fs_setup_tdb(device_name, &io_ptr);
@@ -642,7 +654,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		if (io_ptr != io_ptr_orig) {
  			ext2fs_close(fs);
  			goto retry_open;
-@@ -1654,7 +1775,7 @@ retry_open:
+@@ -1666,7 +1787,7 @@ retry_open:
  		printf("%.*s\n", (int) sizeof(sb->s_volume_name),
  		       sb->s_volume_name);
  		remove_error_table(&et_ext2_error_table);
@@ -651,7 +663,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  	}
  
  	retval = ext2fs_check_if_mounted(device_name, &mount_flags);
-@@ -1662,7 +1783,8 @@ retry_open:
+@@ -1674,7 +1795,8 @@ retry_open:
  		com_err("ext2fs_check_if_mount", retval,
  			_("while determining whether %s is mounted."),
  			device_name);
@@ -661,7 +673,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  	}
  	/* Normally we only need to write out the superblock */
  	fs->flags |= EXT2_FLAG_SUPER_ONLY;
-@@ -1702,12 +1824,19 @@ retry_open:
+@@ -1714,12 +1836,19 @@ retry_open:
  			 "(%u blocks)\n"),
  		       reserved_ratio, sb->s_r_blocks_count);
  	}
@@ -682,7 +694,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		}
  		sb->s_r_blocks_count = reserved_blocks;
  		ext2fs_mark_super_dirty(fs);
-@@ -1731,7 +1860,8 @@ retry_open:
+@@ -1743,7 +1872,8 @@ retry_open:
  	if (s_flag == 0) {
  		fputs(_("\nClearing the sparse superflag not supported.\n"),
  		      stderr);
@@ -692,7 +704,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  	}
  	if (T_flag) {
  		sb->s_lastcheck = last_check_time;
-@@ -1759,14 +1889,36 @@ retry_open:
+@@ -1771,14 +1901,36 @@ retry_open:
  			sizeof(sb->s_last_mounted));
  		ext2fs_mark_super_dirty(fs);
  	}
@@ -737,7 +749,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  
  	if (U_flag) {
  		int set_csum = 0;
-@@ -1794,7 +1946,8 @@ retry_open:
+@@ -1806,7 +1958,8 @@ retry_open:
  			uuid_generate(sb->s_uuid);
  		} else if (uuid_parse(new_UUID, sb->s_uuid)) {
  			com_err(program_name, 0, _("Invalid UUID format\n"));
@@ -747,7 +759,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		}
  		if (set_csum) {
  			for (i = 0; i < fs->group_desc_count; i++)
-@@ -1808,7 +1961,8 @@ retry_open:
+@@ -1820,7 +1973,8 @@ retry_open:
  			fputs(_("The inode size may only be "
  				"changed when the filesystem is "
  				"unmounted.\n"), stderr);
@@ -757,8 +769,8 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.c
  		}
  		if (fs->super->s_feature_incompat &
  		    EXT4_FEATURE_INCOMPAT_FLEX_BG) {
-@@ -1843,5 +1997,12 @@ retry_open:
- 	}
+@@ -1866,5 +2020,12 @@ retry_open:
+ 
  	free(device_name);
  	remove_error_table(&et_ext2_error_table);
 +
@@ -774,7 +786,7 @@ Index: e2fsprogs-1.41.12/e2fsck/pass1.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/pass1.c
 +++ e2fsprogs-1.41.12/e2fsck/pass1.c
-@@ -867,7 +867,20 @@ void e2fsck_pass1(e2fsck_t ctx)
+@@ -871,7 +871,20 @@ void e2fsck_pass1(e2fsck_t ctx)
  	    (fs->super->s_mtime < fs->super->s_inodes_count))
  		busted_fs_time = 1;
  
@@ -817,7 +829,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/unix.c
 +++ e2fsprogs-1.41.12/e2fsck/unix.c
-@@ -1041,6 +1041,70 @@ static errcode_t try_open_fs(e2fsck_t ct
+@@ -1059,6 +1059,70 @@ static errcode_t try_open_fs(e2fsck_t ct
  static const char *my_ver_string = E2FSPROGS_VERSION;
  static const char *my_ver_date = E2FSPROGS_DATE;
  
@@ -888,7 +900,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
  int main (int argc, char *argv[])
  {
  	errcode_t	retval = 0, retval2 = 0, orig_retval = 0;
-@@ -1109,6 +1173,8 @@ int main (int argc, char *argv[])
+@@ -1127,6 +1191,8 @@ int main (int argc, char *argv[])
  				    _("need terminal for interactive repairs"));
  	}
  	ctx->superblock = ctx->use_superblock;
@@ -897,7 +909,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
  restart:
  #ifdef CONFIG_TESTIO_DEBUG
  	if (getenv("TEST_IO_FLAGS") || getenv("TEST_IO_BLOCK")) {
-@@ -1117,7 +1183,7 @@ restart:
+@@ -1135,7 +1201,7 @@ restart:
  	} else
  #endif
  		io_ptr = unix_io_manager;
@@ -906,7 +918,7 @@ Index: e2fsprogs-1.41.12/e2fsck/unix.c
  	if ((ctx->options & E2F_OPT_READONLY) == 0)
  		flags |= EXT2_FLAG_RW | EXT2_FLAG_EXCLUSIVE;
  	/* we would abort above in check_mount() unless user asks for this */
-@@ -1283,6 +1349,21 @@ failure:
+@@ -1305,6 +1371,21 @@ failure:
  
  	ehandler_init(fs->io);
  
@@ -976,9 +988,9 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/swapfs.c
 +	sb->s_mmp_update_interval = ext2fs_swab16(sb->s_mmp_update_interval);
 +	sb->s_mmp_block = ext2fs_swab64(sb->s_mmp_block);
  	sb->s_kbytes_written = ext2fs_swab64(sb->s_kbytes_written);
- 	for (i=0; i < 4; i++)
- 		sb->s_hash_seed[i] = ext2fs_swab32(sb->s_hash_seed[i]);
-@@ -282,4 +284,12 @@ void ext2fs_swap_inode(ext2_filsys fs, s
+ 	sb->s_snapshot_inum = ext2fs_swab32(sb->s_snapshot_inum);
+ 	sb->s_snapshot_id = ext2fs_swab32(sb->s_snapshot_id);
+@@ -288,4 +290,12 @@ void ext2fs_swap_inode(ext2_filsys fs, s
  				sizeof(struct ext2_inode));
  }
  
@@ -1043,7 +1055,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/openfs.c
   */
  errcode_t ext2fs_open2(const char *name, const char *io_options,
  		       int flags, int superblock,
-@@ -353,6 +357,18 @@ errcode_t ext2fs_open2(const char *name,
+@@ -355,6 +359,18 @@ errcode_t ext2fs_open2(const char *name,
  
  	fs->flags &= ~EXT2_FLAG_NOFREE_ON_ERROR;
  	*ret_fs = fs;
@@ -1066,7 +1078,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/closefs.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/ext2fs/closefs.c
 +++ e2fsprogs-1.41.12/lib/ext2fs/closefs.c
-@@ -397,6 +397,11 @@ errcode_t ext2fs_close(ext2_filsys fs)
+@@ -400,6 +400,11 @@ errcode_t ext2fs_close(ext2_filsys fs)
  		if (retval)
  			return retval;
  	}
@@ -1104,7 +1116,7 @@ Index: e2fsprogs-1.41.12/e2fsck/e2fsck.h
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/e2fsck.h
 +++ e2fsprogs-1.41.12/e2fsck/e2fsck.h
-@@ -559,6 +559,8 @@ extern blk_t get_backup_sb(e2fsck_t ctx,
+@@ -563,6 +563,8 @@ extern blk_t get_backup_sb(e2fsck_t ctx,
  			   const char *name, io_manager manager);
  extern int ext2_file_type(unsigned int mode);
  extern int write_all(int fd, char *buf, size_t count);
@@ -1186,7 +1198,7 @@ Index: e2fsprogs-1.41.12/lib/ext2fs/Makefile.in
  	$(srcdir)/namei.c \
  	$(srcdir)/native.c \
  	$(srcdir)/newdir.c \
-@@ -625,6 +627,8 @@ mkjournal.o: $(srcdir)/mkjournal.c $(src
+@@ -630,6 +632,8 @@ mkjournal.o: $(srcdir)/mkjournal.c $(src
   $(top_builddir)/lib/ext2fs/ext2_err.h $(srcdir)/ext2_ext_attr.h \
   $(srcdir)/bitops.h $(srcdir)/jfs_user.h $(srcdir)/kernel-jbd.h \
   $(srcdir)/jfs_compat.h $(srcdir)/kernel-list.h
@@ -1624,7 +1636,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.8.in
 ===================================================================
 --- e2fsprogs-1.41.12.orig/misc/tune2fs.8.in
 +++ e2fsprogs-1.41.12/misc/tune2fs.8.in
-@@ -161,6 +161,11 @@ separated, and may take an argument usin
+@@ -167,6 +167,11 @@ separated, and may take an argument usin
  The following extended options are supported:
  .RS 1.2i
  .TP
@@ -1636,7 +1648,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.8.in
  .BI stride= stride-size
  Configure the filesystem for a RAID array with
  .I stride-size
-@@ -464,6 +469,11 @@ future.
+@@ -519,6 +524,11 @@ future.
  .B Tune2fs 
  only supports clearing this filesystem feature.
  .TP
@@ -1648,7 +1660,7 @@ Index: e2fsprogs-1.41.12/misc/tune2fs.8.in
  .B sparse_super
  Limit the number of backup superblocks to save space on large filesystems.
  .TP
-@@ -500,6 +510,9 @@ and
+@@ -555,6 +565,9 @@ and
  .BR flex_bg
  features are only supported by the ext4 filesystem.
  .TP
@@ -1662,7 +1674,7 @@ Index: e2fsprogs-1.41.12/misc/mke2fs.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/misc/mke2fs.c
 +++ e2fsprogs-1.41.12/misc/mke2fs.c
-@@ -847,7 +847,8 @@ static __u32 ok_features[3] = {
+@@ -866,7 +866,8 @@ static __u32 ok_features[3] = {
  		EXT3_FEATURE_INCOMPAT_EXTENTS|
  		EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|
  		EXT2_FEATURE_INCOMPAT_META_BG|
@@ -1672,7 +1684,7 @@ Index: e2fsprogs-1.41.12/misc/mke2fs.c
  	/* R/O compat */
  	EXT2_FEATURE_RO_COMPAT_LARGE_FILE|
  		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
-@@ -2255,8 +2256,20 @@ int main (int argc, char *argv[])
+@@ -2366,8 +2367,20 @@ int main (int argc, char *argv[])
  	}
  no_journal:
  
@@ -1698,9 +1710,9 @@ Index: e2fsprogs-1.41.12/lib/e2p/ls.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/lib/e2p/ls.c
 +++ e2fsprogs-1.41.12/lib/e2p/ls.c
-@@ -330,6 +330,12 @@ void list_super2(struct ext2_super_block
- 			fprintf(f, "type %u\n", sb->s_jnl_backup_type);
- 		}
+@@ -374,6 +374,12 @@ void list_super2(struct ext2_super_block
+ 		fprintf(f, "Last error block #:       %llu\n",
+ 			sb->s_last_error_block);
  	}
 +	if (sb->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) {
 +		fprintf(f, "MMP block number:         %llu\n",
@@ -1744,7 +1756,7 @@ Index: e2fsprogs-1.41.12/e2fsck/journal.c
 ===================================================================
 --- e2fsprogs-1.41.12.orig/e2fsck/journal.c
 +++ e2fsprogs-1.41.12/e2fsck/journal.c
-@@ -880,6 +880,8 @@ int e2fsck_run_ext3_journal(e2fsck_t ctx
+@@ -881,6 +881,8 @@ int e2fsck_run_ext3_journal(e2fsck_t ctx
  		ctx->fs->io->manager->get_stats(ctx->fs->io, &stats);
  	if (stats && stats->bytes_written)
  		kbytes_written = stats->bytes_written >> 10;
@@ -1779,7 +1791,7 @@ Index: e2fsprogs-1.41.12/debugfs/debugfs.c
  
  	retval = ext2fs_open(device, open_flags, superblock, blocksize,
  			     unix_io_manager, &current_fs);
-@@ -2096,6 +2098,39 @@ void do_supported_features(int argc, cha
+@@ -2091,6 +2093,39 @@ void do_supported_features(int argc, cha
  	}
  }
  
