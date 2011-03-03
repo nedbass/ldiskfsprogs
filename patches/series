@@ -67,6 +67,7 @@ e2fsprogs-large-ea.patch
 e2fsprogs-tests-f_large_ea.patch
 e2fsprogs-lustre_ismounted.patch
 e2fsprogs-lfsck.patch
+e2fsprogs-lfsck-rename-object-gr.patch
 e2fsprogs-lfsck-absolute-path.patch
 e2fsprogs-add-io_channel_readahead.patch
 e2fsprogs-e2scan.patch
@@ -75,4 +76,5 @@ e2fsprogs-data_in_dirent.patch
 e2fsprogs-tests-f_data_in_dirent.patch
 e2fsprogs-rpm_support.patch
 e2fsprogs-add-trusted-fid.patch
+e2fsprogs-refactor-filter-fid.patch
 sles/11/system-blkid.patch

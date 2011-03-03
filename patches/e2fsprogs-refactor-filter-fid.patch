@@ -1,0 +1,59 @@
+Index: e2fsprogs/configure.in
+===================================================================
+--- e2fsprogs.orig/configure.in
++++ e2fsprogs/configure.in
+@@ -233,6 +233,14 @@ else
+ 	               [struct lov_user_md lov; lov.lmm_object_seq = 0;],
+ 	               [AC_DEFINE(HAVE_OBJECT_SEQ)],
+ 	               [])
++	AC_TRY_COMPILE([
++	                	#include <stdlib.h>
++	                	#include <asm/types.h>
++	                	#include <lustre/lustre_user.h>
++	               ],
++	               [struct filter_fid fid; fid.ff_seq = 0;],
++	               [AC_DEFINE(HAVE_FILTER_FID_SEQ)],
++	               [])
+ 	echo "Enabling Lustre lfsck support"
+ fi
+ ,
+@@ -247,6 +255,14 @@ AC_TRY_COMPILE([
+                [struct lov_user_md lov; lov.lmm_object_seq = 0;],
+                [AC_DEFINE(HAVE_OBJECT_SEQ)],
+                [])
++AC_TRY_COMPILE([
++                	#include <stdlib.h>
++                	#include <asm/types.h>
++                	#include <lustre/lustre_user.h>
++               ],
++               [struct filter_fid fid; fid.ff_seq = 0;],
++               [AC_DEFINE(HAVE_FILTER_FID_SEQ)],
++               [])
+ echo "Enabling Lustre lfsck support by default"
+ )
+ AC_SUBST(LFSCK_CMT)
+Index: e2fsprogs/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs.orig/debugfs/debugfs.c
++++ e2fsprogs/debugfs/debugfs.c
+@@ -523,10 +523,20 @@ static void print_fidstr(FILE *out, ext2
+ 	}
+ 	fprintf(out, "  fid: objid=%llu seq=%llu parent="DFID" stripe=%u ",
+ 		ext2fs_le64_to_cpu(ff->ff_objid),
++#ifdef HAVE_FILTER_FID_SEQ
++		ext2fs_le64_to_cpu(ff->ff_seq),
++#else /* !HAVE_FILTER_FID_SEQ */
+ 		ext2fs_le64_to_cpu(ff->ff_group),
++#endif /* HAVE_FILTER_FID_SEQ */
++#ifdef HAVE_FILTER_FID_SEQ
++		ext2fs_le64_to_cpu(ff->ff_parent.f_seq),
++		ext2fs_le32_to_cpu(ff->ff_parent.f_oid),
++		ext2fs_le32_to_cpu(ff->ff_parent.f_ver));
++#else /* !HAVE_FILTER_FID_SEQ */
+ 		ext2fs_le64_to_cpu(ff->ff_fid.id),
+ 		ext2fs_le32_to_cpu(ff->ff_fid.generation),
+ 		ext2fs_le32_to_cpu(ff->ff_fid.f_type));
++#endif /* HAVE_FILTER_FID_SEQ */
+ }
+ #endif
+ 

@@ -1,0 +1,112 @@
+Index: e2fsprogs/configure.in
+===================================================================
+--- e2fsprogs.orig/configure.in
++++ e2fsprogs/configure.in
+@@ -225,12 +225,28 @@ else
+ 	LFSCK_CMT=
+ 	LFSCK_MAN=
+ 	AC_DEFINE(ENABLE_LFSCK)
++	AC_TRY_COMPILE([
++	                	#include <stdlib.h>
++	                	#include <asm/types.h>
++	                	#include <lustre/lustre_user.h>
++	               ],
++	               [struct lov_user_md lov; lov.lmm_object_seq = 0;],
++	               [AC_DEFINE(HAVE_OBJECT_SEQ)],
++	               [])
+ 	echo "Enabling Lustre lfsck support"
+ fi
+ ,
+ LFSCK_CMT=
+ LFSCK_MAN=
+ AC_DEFINE(ENABLE_LFSCK)
++AC_TRY_COMPILE([
++                	#include <stdlib.h>
++                	#include <asm/types.h>
++                	#include <lustre/lustre_user.h>
++               ],
++               [struct lov_user_md lov; lov.lmm_object_seq = 0;],
++               [AC_DEFINE(HAVE_OBJECT_SEQ)],
++               [])
+ echo "Enabling Lustre lfsck support by default"
+ )
+ AC_SUBST(LFSCK_CMT)
+Index: e2fsprogs/e2fsck/lfsck.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/lfsck.c
++++ e2fsprogs/e2fsck/lfsck.c
+@@ -926,7 +926,7 @@ int lfsck_fix_orphan(__u32 ost_idx, __u6
+ 	lum->lmm_stripe_offset = 0;
+ 	lum->lmm_stripe_count = 1;
+ 	lum->lmm_objects[0].l_object_id = ost_objid;
+-	lum->lmm_objects[0].l_object_gr = ost_group;
++	L_OBJECT_SEQ(&(lum->lmm_objects[0])) = ost_group;
+ 	lum->lmm_objects[0].l_ost_gen = 0;
+ 	lum->lmm_objects[0].l_ost_idx = ost_idx;
+ 
+Index: e2fsprogs/e2fsck/lfsck.h
+===================================================================
+--- e2fsprogs.orig/e2fsck/lfsck.h
++++ e2fsprogs/e2fsck/lfsck.h
+@@ -210,6 +210,14 @@ sizeof(struct lfsck_mds_hdr) + (sizeof(s
+ 
+ #define OST_START_OFFSET  sizeof(struct lfsck_ost_hdr)
+ 
++#ifdef HAVE_OBJECT_SEQ
++#define LMM_OBJECT_SEQ(lov) (lov)->lmm_object_seq
++#define L_OBJECT_SEQ(lov) (lov)->l_object_seq
++#else /* !HAVE_OBJECT_SEQ */
++#define LMM_OBJECT_SEQ(lov) (lov)->lmm_object_gr
++#define L_OBJECT_SEQ(lov) (lov)->l_object_gr
++#endif /* HAVE_OBJECT_SEQ */
++
+ #else /* !ENABLE_LFSCK */
+ #define e2fsck_lfsck_found_ea(ctx, ino, inode, entry, value) (0)
+ #define e2fsck_lfsck_flush_ea(ctx) (0)
+Index: e2fsprogs/e2fsck/lfsck_common.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/lfsck_common.c
++++ e2fsprogs/e2fsck/lfsck_common.c
+@@ -307,7 +307,7 @@ void letocpu_lov_user_md(struct lov_user
+ 	lmm->lmm_magic = ext2fs_le32_to_cpu(lmm->lmm_magic);
+ 	lmm->lmm_pattern = ext2fs_le32_to_cpu(lmm->lmm_pattern);
+ 	lmm->lmm_object_id = ext2fs_le64_to_cpu(lmm->lmm_object_id);
+-	lmm->lmm_object_gr = ext2fs_le64_to_cpu(lmm->lmm_object_gr);
++	LMM_OBJECT_SEQ(lmm) = ext2fs_le64_to_cpu(LMM_OBJECT_SEQ(lmm));
+ 	lmm->lmm_stripe_size = ext2fs_le32_to_cpu(lmm->lmm_stripe_size);
+ 	lmm->lmm_stripe_count = ext2fs_le16_to_cpu(lmm->lmm_stripe_count);
+ 	/* No swabbing needed for the lov_user_md_v3 lmm_pool_name */
+@@ -321,7 +321,7 @@ void letocpu_lov_user_md(struct lov_user
+ 
+ 	for (i = 0; i < lmm->lmm_stripe_count; i++, loi++) {
+ 		loi->l_object_id = ext2fs_le64_to_cpu(loi->l_object_id);
+-		loi->l_object_gr = ext2fs_le64_to_cpu(loi->l_object_gr);
++		L_OBJECT_SEQ(loi) = ext2fs_le64_to_cpu(L_OBJECT_SEQ(loi));
+ 		loi->l_ost_gen = ext2fs_le32_to_cpu(loi->l_ost_gen);
+ 		loi->l_ost_idx = ext2fs_le32_to_cpu(loi->l_ost_idx);
+ 	}
+Index: e2fsprogs/e2fsck/pass6.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass6.c
++++ e2fsprogs/e2fsck/pass6.c
+@@ -278,7 +278,7 @@ static int e2fsck_lfsck_save_ea(e2fsck_t
+ 	/* XXX: We don't save the layout type here.  This doesn't matter for
+ 	 *      now, we don't really need the pool information for lfsck, but
+ 	 *      in the future we may need it for RAID-1 and other layouts. */
+-	szinfo.mds_group = lmm->lmm_object_gr;
++	szinfo.mds_group = LMM_OBJECT_SEQ(lmm);
+ 	szinfo.mds_stripe_size = lmm->lmm_stripe_size;
+ 	szinfo.mds_stripe_start = loi->l_ost_idx;
+ 	szinfo.mds_stripe_count = lmm->lmm_stripe_count;
+@@ -385,9 +385,9 @@ int lfsck_check_lov_ea(e2fsck_t ctx, str
+ 		return(-EINVAL);
+ 	}
+ 
+-	if (lmm->lmm_object_gr != 0 ) {
++	if (LMM_OBJECT_SEQ(lmm) != 0 ) {
+ 		VERBOSE(ctx, "error: only handle group 0 not "LPU64"\n",
+-			lmm->lmm_object_gr);
++			LMM_OBJECT_SEQ(lmm));
+ 		return(-EINVAL);
+ 	}
+ 
