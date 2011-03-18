@@ -1,0 +1,27 @@
+Minor reformatting patch to make applying later patches easier.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/e2fsck/unix.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/unix.c
++++ e2fsprogs/e2fsck/unix.c
+@@ -587,14 +587,13 @@ static void parse_extended_opts(e2fsck_t
+ 				continue;
+ 			}
+ 			ea_ver = strtoul(arg, &p, 0);
+-			if (*p ||
+-			    ((ea_ver != 1) && (ea_ver != 2))) {
+-				fprintf(stderr,
+-					_("Invalid EA version.\n"));
++			if (*p == '\0' && (ea_ver == 1 || ea_ver == 2)) {
++				ctx->ext_attr_ver = ea_ver;
++			} else {
++				fprintf(stderr, _("Invalid EA version.\n"));
+ 				extended_usage++;
+ 				continue;
+ 			}
+-			ctx->ext_attr_ver = ea_ver;
+ 		} else if (strcmp(token, "fragcheck") == 0) {
+ 			ctx->options |= E2F_OPT_FRAGCHECK;
+ 			continue;

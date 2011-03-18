@@ -1,0 +1,160 @@
+Check if Lustre filesystems mounted
+
+Index: e2fsprogs/lib/ext2fs/ismounted.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ismounted.c
++++ e2fsprogs/lib/ext2fs/ismounted.c
+@@ -30,6 +30,8 @@
+ #endif /* HAVE_GETMNTINFO */
+ #include <string.h>
+ #include <sys/stat.h>
++#include <sys/types.h>
++#include <dirent.h>
+ 
+ #include "ext2_fs.h"
+ #include "ext2fs.h"
+@@ -286,6 +288,135 @@ leave:
+ 	return ret;
+ }
+ 
++static int check_lustre_proc_vals(const char *procname,const char *real_devname)
++{
++	struct dirent *direntp;
++	DIR *dirp;
++	int rc = 0;
++	char  *mnt_device, *proc_val, *real_mnt_device;
++
++	mnt_device = malloc(PATH_MAX);
++	if (mnt_device == NULL) {
++		fprintf(stderr, "Cannot allocate memory to store path\n");
++		return 1;
++	}
++	proc_val = malloc(PATH_MAX);
++	if (proc_val == NULL) {
++		fprintf(stderr, "Cannot allocate memory to store path\n");
++		free(mnt_device);
++		return 1;
++	}
++	real_mnt_device = malloc(PATH_MAX);
++	if (real_mnt_device == NULL) {
++		fprintf(stderr, "Cannot allocate memory to store path\n");
++		free(proc_val);
++		free(mnt_device);
++		return 1;
++	}
++
++	dirp = opendir(procname);
++	if (dirp) {
++		do {
++			int fd, numr;
++			char *ptr;
++
++			direntp = readdir(dirp);
++			if (direntp == NULL)
++				break;
++			if ((strncmp(direntp->d_name, ".", 1) == 0) ||
++			    (strncmp(direntp->d_name, "..", 2) == 0)) {
++				continue;
++			}
++
++			memset(proc_val, 0, PATH_MAX);
++			snprintf(proc_val, PATH_MAX, "%s/%s/mntdev", procname,
++				 direntp->d_name);
++			fd = open(proc_val, O_RDONLY);
++			if (fd < 0)  {
++				if (errno == ENOENT || errno == ENOTDIR)
++					continue;
++				fprintf(stderr, "Cannot open %s: %s\n",
++					proc_val, strerror(errno));
++				rc = 1;
++				goto out;
++			}
++
++			memset(mnt_device, 0, PATH_MAX);
++			numr = 0;
++			ptr = mnt_device;
++			do {
++				numr = read(fd, ptr, PATH_MAX);
++				if (numr < 0) {
++					fprintf(stderr,
++						"Failure to get mntdev info\n");
++					rc = 1;
++					close(fd);
++					goto out;
++				}
++				ptr += numr;
++			} while (numr != 0);
++			close(fd);
++
++			ptr = strchr(mnt_device, '\n');
++			if (ptr)
++				*ptr = '\0';
++
++			memset(real_mnt_device, 0, PATH_MAX);
++			if (realpath(mnt_device, real_mnt_device) == NULL) {
++				fprintf(stderr, "Cannot resolve mntdev %s\n",
++					mnt_device);
++				rc = 1;
++				goto out;
++			}
++
++			if (strcmp(real_devname, real_mnt_device) == 0) {
++				fprintf(stderr,
++					"device %s mounted by lustre per %s\n",
++					real_devname, proc_val);
++				rc = -1;
++				goto out;
++			}
++		} while (direntp != NULL);
++
++		closedir(dirp);
++	}
++
++out:
++	free(proc_val);
++	free(mnt_device);
++	free(real_mnt_device);
++
++	return rc;
++}
++
++static errcode_t check_if_lustre_mounted(const char *device, int *mount_flags)
++{
++	char *real_device;
++	int rc = 0;
++
++	real_device = malloc(PATH_MAX);
++	if (real_device == NULL) {
++		fprintf(stderr, "Cannot allocate memory to store path\n");
++		return EXT2_ET_NO_MEMORY;
++	}
++
++	if (realpath(device, real_device) == NULL) {
++		fprintf(stderr, "Cannot resolve path %s\n", device);
++		return EXT2_ET_BAD_DEVICE_NAME;
++	}
++
++	rc = check_lustre_proc_vals("/proc/fs/lustre/obdfilter", real_device);
++	if (!rc)
++		rc = check_lustre_proc_vals("/proc/fs/lustre/mds",real_device);
++
++	if (rc)
++		*mount_flags |= EXT2_MF_MOUNTED;
++
++	free(real_device);
++
++	return 0;
++}
++
+ 
+ /*
+  * ext2fs_check_mount_point() fills determines if the device is
+@@ -337,6 +468,8 @@ errcode_t ext2fs_check_mount_point(const
+ 		close(fd);
+ #endif
+ 
++	retval = check_if_lustre_mounted(device, mount_flags);
++
+ 	return 0;
+ }
+ 

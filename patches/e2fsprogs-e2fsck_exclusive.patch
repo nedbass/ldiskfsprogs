@@ -1,0 +1,35 @@
+b=13698
+The checks done by e2fsck for mounted vs. read-only runs is confusing.
+
+On the one hand, if e2fsck is NOT run with the "-n" flag (i.e. it might
+modify the filesystem), there is no guarantee that it will open the
+filesystem with the EXCLUSIVE flag (i.e. O_EXCL) to prevent the block
+device from being used (in most cases = mounted).
+
+On the other hand, if e2fsck is run with "-n" (i.e. read-only),
+and the /etc/fstab or /proc/mounts does not report the same block
+device to match the mountpoint (which happens for Lustre, and can
+also happen if there is an overlay mount) then the e2fsck thinks
+the filesystem is unmounted, but fails because the EXCLUSIVE flag
+is set even though it is running read-only.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/e2fsck/unix.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/unix.c
++++ e2fsprogs/e2fsck/unix.c
+@@ -1056,9 +1056,10 @@ restart:
+ 	if (!old_bitmaps)
+ 		flags |= EXT2_FLAG_64BITS;
+ 	if ((ctx->options & E2F_OPT_READONLY) == 0)
+-		flags |= EXT2_FLAG_RW;
+-	if ((ctx->mount_flags & EXT2_MF_MOUNTED) == 0)
+-		flags |= EXT2_FLAG_EXCLUSIVE;
++		flags |= EXT2_FLAG_RW | EXT2_FLAG_EXCLUSIVE;
++	/* we would abort above in check_mount() unless user asks for this */
++	if ((ctx->mount_flags & EXT2_MF_MOUNTED) != 0)
++		flags &= ~EXT2_FLAG_EXCLUSIVE;
+ 
+ 	retval = try_open_fs(ctx, flags, io_ptr, &fs);
+ 

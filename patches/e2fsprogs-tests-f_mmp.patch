@@ -1,0 +1,169 @@
+Index: e2fsprogs/tests/f_mmp/name
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp/name
+@@ -0,0 +1 @@
++enable MMP during mke2fs
+Index: e2fsprogs/tests/f_mmp/script
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp/script
+@@ -0,0 +1,24 @@
++FSCK_OPT=-yf
++touch $TMPFILE
++
++stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
++if [ $? == 0 ] ; then
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
++fi
++
++$MKE2FS -q -F -o Linux -b 1024 -O mmp $TMPFILE 100 > $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "mke2fs -O mmp failed" >  $test_name.failed
++fi
++
++$FSCK $FSCK_OPT $TMPFILE > $test_name.log 2>&1
++status=$?
++if [ "$status" = 0 ] ; then
++	echo "ok"
++	touch $test_name.ok
++else
++	echo "e2fsck with MMP enabled failed" >  $test_name.failed
++fi
++
+Index: e2fsprogs/tests/f_mmp_off/name
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_off/name
+@@ -0,0 +1 @@
++disable MMP
+Index: e2fsprogs/tests/f_mmp_off/script
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_off/script
+@@ -0,0 +1,30 @@
++FSCK_OPT=-yf
++touch $TMPFILE
++
++stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
++if [ $? == 0 ] ; then
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
++fi
++
++$MKE2FS -q -F -o Linux -b 1024 -O mmp $TMPFILE 100 > $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "mke2fs -O mmp failed" >  $test_name.failed
++fi
++
++$TUNE2FS -O ^mmp $TMPFILE > $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "tune2fs -O ^mmp failed" >  $test_name.failed
++fi
++
++$FSCK $FSCK_OPT  $TMPFILE > $test_name.log 2>&1
++status=$?
++if [ "$status" = 0 ] ; then
++	echo "ok"
++	touch $test_name.ok
++else
++	echo "e2fsck after MMP disable failed" >  $test_name.failed
++fi
++
+Index: e2fsprogs/tests/f_mmp_on/name
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_on/name
+@@ -0,0 +1 @@
++enable MMP using tune2fs
+Index: e2fsprogs/tests/f_mmp_on/script
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_on/script
+@@ -0,0 +1,30 @@
++FSCK_OPT=-yf
++touch $TMPFILE
++
++stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
++if [ $? == 0 ] ; then
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
++fi
++
++$MKE2FS -q -F -o Linux -b 1024 $TMPFILE 100 > $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "mke2fs failed" >  $test_name.failed
++fi
++
++$TUNE2FS -O mmp $TMPFILE > $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "tune2fs -O mmp failed" >  $test_name.failed
++fi
++
++$FSCK $FSCK_OPT  $TMPFILE > $test_name.log 2>&1
++status=$?
++if [ "$status" = 0 ] ; then
++	echo "ok"
++	touch $test_name.ok
++else
++	echo "e2fsck with MMP enabled failed" >  $test_name.failed
++fi
++
+Index: e2fsprogs/tests/f_mmp_corrupt/name
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_corrupt/name
+@@ -0,0 +1 @@
++repair MMP when it is corrupted
+Index: e2fsprogs/tests/f_mmp_corrupt/script
+===================================================================
+--- /dev/null
++++ e2fsprogs/tests/f_mmp_corrupt/script
+@@ -0,0 +1,41 @@
++FSCK_OPT=-yf
++touch $TMPFILE
++
++stat -f $TMPFILE | grep "Type: tmpfs" > /dev/null
++if [ $? == 0 ] ; then
++	echo "skipped for tmpfs (no O_DIRECT support)"
++	return 0
++fi
++
++echo "make the test image ..." > $test_name.log
++$MKE2FS -q -F -o Linux -b 1024 -O mmp $TMPFILE 100 >> $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "mke2fs -O mmp failed" >  $test_name.failed
++	exit 1
++fi
++
++# create a corrupted image
++mmp_block=`$DEBUGFS -R "dump_mmp" $TMPFILE 2>/dev/null | grep "MMP Block" | awk '{print $NF}'`
++echo "mmp_block is: $mmp_block" >> $test_name.log
++echo "corrupt the mmp ..." >> $test_name.log
++dd conv=notrunc if=/dev/zero of=$TMPFILE bs=1k count=1 seek=$mmp_block >> $test_name.log 2>&1
++
++echo "the first fsck ..." >> $test_name.log
++$FSCK $FSCK_OPT $TMPFILE >> $test_name.log 2>&1
++status=$?
++if [ "$status" != 0 ] ; then
++	echo "the second fsck ..." >> $test_name.log
++	$FSCK $FSCK_OPT $TMPFILE >> $test_name.log 2>&1
++	status=$?
++	if  [ "$status" = 0 ] ; then
++	echo "ok"
++	touch $test_name.ok
++	else
++	echo "the second fsck with corrupted mmp failed" >  $test_name.failed
++	fi
++else
++	echo "the first fsck with corrupted mmp failed" >  $test_name.failed
++fi
++
++rm -f $TMPFILE

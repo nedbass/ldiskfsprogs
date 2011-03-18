@@ -1,0 +1,101 @@
+Index: e2fsprogs/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs.orig/debugfs/debugfs.c
++++ e2fsprogs/debugfs/debugfs.c
+@@ -494,9 +494,38 @@ static void dump_xattr_string(FILE *out,
+ 			fprintf(out, "%02x ", (unsigned char)str[i]);
+ }
+ 
++#ifdef ENABLE_LFSCK
++#include "ext2fs/lfsck.h"
++
++static void print_fidstr(FILE *out, ext2_ino_t inode_num, void *data, int len)
++{
++	static int fid_size_warning;
++	struct filter_fid *ff = data;
++
++	if (len < sizeof(*ff)) {
++		fprintf(stderr, "%s: error: fid for inode %u smaller than "
++			"expected (%d bytes), recompile?\n",
++			debug_prog_name, inode_num, len);
++		return;
++	}
++	if (len > sizeof(*ff) && !fid_size_warning) {
++		fprintf(stderr, "%s: warning: fid for inode %u larger than "
++			"expected (%d bytes), recompile?\n",
++			debug_prog_name, inode_num, len);
++		fid_size_warning = 1;
++	}
++	fprintf(out, "  fid: objid=%llu seq=%llu parent="DFID" stripe=%u\n",
++		ext2fs_le64_to_cpu(ff->ff_objid),
++		ext2fs_le64_to_cpu(ff->ff_seq),
++		ext2fs_le64_to_cpu(ff->ff_parent_seq),
++		ext2fs_le32_to_cpu(ff->ff_parent_oid), /* f_ver */ 0,
++		ext2fs_le32_to_cpu(ff->ff_stripe));
++}
++#endif /* ENABLE_LFSCK */
++
+ static void internal_dump_inode_extra(FILE *out,
+ 				      const char *prefix EXT2FS_ATTR((unused)),
+-				      ext2_ino_t inode_num EXT2FS_ATTR((unused)),
++				      ext2_ino_t inode_num,
+ 				      struct ext2_inode_large *inode)
+ {
+ 	struct ext2_ext_attr_entry *entry;
+@@ -536,6 +565,16 @@ static void internal_dump_inode_extra(FI
+ 			dump_xattr_string(out, start + entry->e_value_offs,
+ 						entry->e_value_size);
+ 			fprintf(out, "\" (%u)\n", entry->e_value_size);
++#ifdef ENABLE_LFSCK
++			/* Special decoding for Lustre fid */
++			if ((entry->e_name_index == EXT2_ATTR_INDEX_TRUSTED ||
++			     entry->e_name_index == EXT2_ATTR_INDEX_LUSTRE) &&
++			    !strncmp(EXT2_EXT_ATTR_NAME(entry),
++				     "fid", entry->e_name_len))
++				print_fidstr(out, inode_num,
++					     start + entry->e_value_offs,
++					     entry->e_value_size);
++#endif
+ 			entry = next;
+ 		}
+ 	}
+Index: e2fsprogs/lib/ext2fs/lfsck.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/lfsck.h
++++ e2fsprogs/lib/ext2fs/lfsck.h
+@@ -42,6 +42,14 @@
+ #ifndef IDENTITY_DOWNCALL_MAGIC
+ #define l_object_seq	l_object_gr		/* for lov_ost_data_v1 */
+ #define lmm_object_seq	lmm_object_gr		/* for lov_mds_md_v1/3 */
++#define ff_seq		ff_group		/* for filter_fid */
++#define ff_parent_seq	ff_fid.id		/* for filter_fid */
++#define ff_parent_oid	ff_fid.generation	/* for filter_fid */
++#define ff_stripe	ff_fid.f_type		/* for filter_fid */
++#else
++#define ff_parent_seq	ff_parent.f_seq		/* for filter_fid */
++#define ff_parent_oid	ff_parent.f_oid		/* for filter_fid */
++#define ff_stripe	ff_parent.f_ver		/* for filter_fid */
+ #endif /* IDENTITY_DOWNCALL_MAGIC */
+ 
+ /* Unfortunately, neither the 1.8 or 2.x lustre_idl.h file is suitable
+Index: e2fsprogs/debugfs/Makefile.in
+===================================================================
+--- e2fsprogs.orig/debugfs/Makefile.in
++++ e2fsprogs/debugfs/Makefile.in
+@@ -24,6 +24,7 @@ SRCS= debug_cmds.c $(srcdir)/debugfs.c $
+ 	$(srcdir)/dump.c $(srcdir)/set_fields.c ${srcdir}/logdump.c \
+ 	$(srcdir)/htree.c $(srcdir)/unused.c
+ 
++@LFSCK_CMT@LUSTRE_INC=-I @LUSTRE@/lustre/include -I @LUSTRE@/include -Wall
+ LIBS= $(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(LIBBLKID) \
+ 	$(LIBUUID)
+ DEPLIBS= $(LIBEXT2FS) $(LIBE2P) $(DEPLIBSS) $(DEPLIBCOM_ERR) \
+@@ -31,7 +32,7 @@ DEPLIBS= $(LIBEXT2FS) $(LIBE2P) $(DEPLIB
+ 
+ .c.o:
+ 	$(E) "	CC $<"
+-	$(Q) $(CC) -c $(ALL_CFLAGS) $< -o $@
++	$(Q) $(CC) -c $(ALL_CFLAGS) $(LUSTRE_INC) $< -o $@
+ 
+ all:: $(PROGS) $(MANPAGES)
+ 

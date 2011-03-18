@@ -1,0 +1,387 @@
+Fixes a number of compile warnings hit during building e2fsprogs.  A few
+unused variable removals, and signed/unsigned pointers.  The only possibly
+controversial fixup is the initialization of rec_len = 0 in copy_dir_entries().
+It wasn't totally obvious to me what to initialize it to (or if it matters),
+but 0 seems reasonable, and is better than random garbage.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/lib/blkid/probe.c
+===================================================================
+--- e2fsprogs.orig/lib/blkid/probe.c
++++ e2fsprogs/lib/blkid/probe.c
+@@ -1296,7 +1296,8 @@ static int probe_hfsplus(struct blkid_pr
+ 		return 0;
+ 
+ 	label_len = blkid_be16(key->unicode_len) * 2;
+-	unicode_16be_to_utf8(label, sizeof(label), key->unicode, label_len);
++	unicode_16be_to_utf8((unsigned char *)label, sizeof(label),
++			     key->unicode, label_len);
+ 	blkid_set_tag(probe->dev, "LABEL", label, 0);
+ 	return 0;
+ }
+Index: e2fsprogs/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs.orig/debugfs/debugfs.c
++++ e2fsprogs/debugfs/debugfs.c
+@@ -855,7 +855,7 @@ void do_stat(int argc, char *argv[])
+ 	return;
+ }
+ 
+-void do_dump_extents(int argc, char *argv[])
++void do_dump_extents(int argc, char **argv)
+ {
+ 	struct ext2_inode inode;
+ 	ext2_ino_t	ino;
+@@ -876,8 +876,7 @@ void do_dump_extents(int argc, char *arg
+ 		}
+ 	}
+ 
+-	if (argc != optind+1) {
+-	print_usage:
++	if (argc != optind + 1) {
+ 		com_err(0, 0, "Usage: dump_extents [-n] [-l] file");
+ 		return;
+ 	}
+Index: e2fsprogs/debugfs/debugfs.h
+===================================================================
+--- e2fsprogs.orig/debugfs/debugfs.h
++++ e2fsprogs/debugfs/debugfs.h
+@@ -103,6 +103,7 @@ extern void do_unlink(int argc, char **a
+ extern void do_find_free_block(int argc, char **argv);
+ extern void do_find_free_inode(int argc, char **argv);
+ extern void do_stat(int argc, char **argv);
++extern void do_dump_extents(int argc, char **argv);
+ 
+ extern void do_chroot(int argc, char **argv);
+ extern void do_clri(int argc, char **argv);
+Index: e2fsprogs/debugfs/dump.c
+===================================================================
+--- e2fsprogs.orig/debugfs/dump.c
++++ e2fsprogs/debugfs/dump.c
+@@ -5,7 +5,9 @@
+  * under the terms of the GNU Public License.
+  */
+ 
++#ifndef _GNU_SOURCE
+ #define _GNU_SOURCE /* for O_LARGEFILE */
++#endif
+ 
+ #include <stdio.h>
+ #include <unistd.h>
+Index: e2fsprogs/debugfs/icheck.c
+===================================================================
+--- e2fsprogs.orig/debugfs/icheck.c
++++ e2fsprogs/debugfs/icheck.c
+@@ -106,13 +106,15 @@ void do_icheck(int argc, char **argv)
+ 	}
+ 
+ 	while (ino) {
++		blk64_t blk;
++
+ 		if (!inode.i_links_count)
+ 			goto next;
+ 
+ 		bw.inode = ino;
+ 
+-		if (ext2fs_file_acl_block(&inode)) {
+-			blk64_t blk;
++		blk = ext2fs_file_acl_block(&inode);
++		if (blk) {
+ 			icheck_proc(current_fs, &blk, 0,
+ 				    0, 0, &bw);
+ 			if (bw.blocks_left == 0)
+Index: e2fsprogs/e2fsck/message.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/message.c
++++ e2fsprogs/e2fsck/message.c
+@@ -263,7 +263,6 @@ static _INLINE_ void expand_inode_expres
+ {
+ 	struct ext2_inode	*inode;
+ 	struct ext2_inode_large	*large_inode;
+-	time_t			t;
+ 
+ 	if (!ctx || !ctx->inode)
+ 		goto no_inode;
+Index: e2fsprogs/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass1.c
++++ e2fsprogs/e2fsck/pass1.c
+@@ -404,7 +404,7 @@ static void check_is_really_dir(e2fsck_t
+ 	struct ext2_dir_entry 	*dirent;
+ 	const char		*old_op;
+ 	errcode_t		retval;
+-	blk64_t			blk, first_dir_blk;
++	blk64_t			blk;
+ 	unsigned int		i, rec_len, not_device = 0;
+ 	int			extent_fs;
+ 
+@@ -436,7 +436,8 @@ static void check_is_really_dir(e2fsck_t
+ 	 * with it.
+ 	 */
+ 
+-	extent_fs = (ctx->fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS);
++	extent_fs = (ctx->fs->super->s_feature_incompat &
++		     EXT3_FEATURE_INCOMPAT_EXTENTS);
+ 	if (extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) {
+ 		/* extent mapped */
+ 		if  (ext2fs_bmap2(ctx->fs, pctx->ino, inode, 0, 0, 0, 0,
+Index: e2fsprogs/e2fsck/pass2.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass2.c
++++ e2fsprogs/e2fsck/pass2.c
+@@ -404,7 +404,8 @@ static int check_dotdot(e2fsck_t ctx,
+ 			struct ext2_dir_entry *dirent,
+ 			ext2_ino_t ino, struct problem_context *pctx)
+ {
+-	int	rec_len, problem = 0;
++	int		problem = 0;
++	unsigned int	rec_len;
+ 
+ 	if (!dirent->inode)
+ 		problem = PR_2_MISSING_DOT_DOT;
+Index: e2fsprogs/e2fsck/pass5.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass5.c
++++ e2fsprogs/e2fsck/pass5.c
+@@ -77,7 +77,6 @@ static void e2fsck_discard_blocks(e2fsck
+ 				  blk64_t start, blk64_t count)
+ {
+ 	ext2_filsys fs = ctx->fs;
+-	int ret = 0;
+ 
+ 	/*
+ 	 * If the filesystem has changed it means that there was an corruption
+Index: e2fsprogs/e2fsck/rehash.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/rehash.c
++++ e2fsprogs/e2fsck/rehash.c
+@@ -430,12 +430,13 @@ static errcode_t copy_dir_entries(e2fsck
+ 		return retval;
+ 	dirent = (struct ext2_dir_entry *) block_start;
+ 	prev_rec_len = 0;
++	rec_len = 0;
+ 	left = fs->blocksize;
+ 	slack = fd->compress ? 12 :
+ 		(fs->blocksize * ctx->htree_slack_percentage)/100;
+ 	if (slack < 12)
+ 		slack = 12;
+-	for (i=0; i < fd->num_array; i++) {
++	for (i = 0; i < fd->num_array; i++) {
+ 		ent = fd->harray + i;
+ 		if (ent->dir->inode == 0)
+ 			continue;
+Index: e2fsprogs/e2fsprogs.spec.in
+===================================================================
+--- e2fsprogs.orig/e2fsprogs.spec.in
++++ e2fsprogs/e2fsprogs.spec.in
+@@ -135,6 +135,7 @@ exit 0
+ %{_sbindir}/filefrag
+ %{_sbindir}/mklost+found
+ %{_sbindir}/e2freefrag
++%{_sbindir}/e4defrag
+ 
+ %{_root_libdir}/libblkid.so.*
+ %{_root_libdir}/libcom_err.so.*
+@@ -180,6 +181,7 @@ exit 0
+ %{_mandir}/man8/tune2fs.8*
+ %{_mandir}/man8/filefrag.8*
+ %{_mandir}/man8/e2freefrag.8*
++%{_mandir}/man8/e4defrag.8*
+ 
+ %files devel
+ %defattr(-,root,root)
+@@ -212,6 +214,7 @@ exit 0
+ %{_includedir}/blkid
+ %{_includedir}/e2p
+ %{_includedir}/et
++%{_includedir}/com_err.h
+ %{_includedir}/ext2fs
+ %{_includedir}/ss
+ %{_includedir}/uuid
+Index: e2fsprogs/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs/lib/ext2fs/ext2fs.h
+@@ -28,6 +28,10 @@ extern "C" {
+ #if (!defined(__GNUC__) && !defined(__WATCOMC__))
+ #define NO_INLINE_FUNCS
+ #endif
++ 
++#ifndef _XOPEN_SOURCE
++#define _XOPEN_SOURCE 600	/* for posix_memalign() */
++#endif
+ 
+ /*
+  * Where the master copy of the superblock is located, and how big
+@@ -1396,7 +1400,8 @@ _INLINE_ errcode_t ext2fs_get_memalign(u
+ 
+ 	if (align == 0)
+ 		align = 8;
+-	if (retval = posix_memalign((void **) ptr, align, size)) {
++	retval = posix_memalign((void **)ptr, align, size);
++	if (retval != 0) {
+ 		if (retval == ENOMEM)
+ 			return EXT2_ET_NO_MEMORY;
+ 		return retval;
+Index: e2fsprogs/lib/ext2fs/ext2fsP.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2fsP.h
++++ e2fsprogs/lib/ext2fs/ext2fsP.h
+@@ -138,6 +138,6 @@ extern errcode_t ext2fs_set_generic_bmap
+ extern errcode_t ext2fs_get_generic_bmap_range(ext2fs_generic_bitmap bitmap,
+ 					       __u64 start, unsigned int num,
+ 					       void *out);
+-extern int ext2fs_warn_bitmap32(ext2fs_generic_bitmap bitmap, const char *func);
++extern void ext2fs_warn_bitmap32(ext2fs_generic_bitmap bitmap,const char *func);
+ 
+ extern int ext2fs_mem_is_zero(const char *mem, size_t len);
+Index: e2fsprogs/lib/ext2fs/fileio.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/fileio.c
++++ e2fsprogs/lib/ext2fs/fileio.c
+@@ -377,7 +377,7 @@ errcode_t ext2fs_file_set_size2(ext2_fil
+ 	truncate_block = ((size + file->fs->blocksize - 1) >>
+ 			  EXT2_BLOCK_SIZE_BITS(file->fs->super)) + 1;
+ 	old_size = file->inode.i_size +
+-		((blk64_t) file->inode.i_size_high) << 32;
++		((blk64_t)file->inode.i_size_high << 32);
+ 	old_truncate = ((old_size + file->fs->blocksize - 1) >>
+ 		      EXT2_BLOCK_SIZE_BITS(file->fs->super)) + 1;
+ 
+Index: e2fsprogs/lib/ext2fs/gen_bitmap64.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/gen_bitmap64.c
++++ e2fsprogs/lib/ext2fs/gen_bitmap64.c
+@@ -547,7 +547,7 @@ void ext2fs_unmark_block_bitmap_range2(e
+ 	bmap->bitmap_ops->unmark_bmap_extent(bmap, block, num);
+ }
+ 
+-int ext2fs_warn_bitmap32(ext2fs_generic_bitmap bitmap, const char *func)
++void ext2fs_warn_bitmap32(ext2fs_generic_bitmap bitmap, const char *func)
+ {
+ #ifndef OMIT_COM_ERR
+ 	if (bitmap && bitmap->description)
+Index: e2fsprogs/lib/ext2fs/openfs.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/openfs.c
++++ e2fsprogs/lib/ext2fs/openfs.c
+@@ -353,7 +353,6 @@ errcode_t ext2fs_open2(const char *name,
+ 	 */
+ 	if (superblock > 1 && EXT2_HAS_RO_COMPAT_FEATURE(fs->super,
+ 					EXT4_FEATURE_RO_COMPAT_GDT_CSUM)) {
+-		struct ext2_group_desc *gd;
+ 		dgrp_t group;
+ 
+ 		for (group = 0; group < fs->group_desc_count; group++) {
+Index: e2fsprogs/lib/ext2fs/progress.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/progress.c
++++ e2fsprogs/lib/ext2fs/progress.c
+@@ -77,8 +77,6 @@ void ext2fs_numeric_progress_close(ext2_
+ 				   struct ext2fs_numeric_progress_struct * progress,
+ 				   const char *message)
+ {
+-	unsigned int len;
+-
+ 	if (!(fs->flags & EXT2_FLAG_PRINT_PROGRESS))
+ 		return;
+ 	fprintf(stdout, "%.*s", (2*progress->log_max)+1, spaces);
+Index: e2fsprogs/lib/ext2fs/unix_io.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/unix_io.c
++++ e2fsprogs/lib/ext2fs/unix_io.c
+@@ -17,7 +17,9 @@
+ 
+ #define _LARGEFILE_SOURCE
+ #define _LARGEFILE64_SOURCE
++#ifndef _GNU_SOURCE
+ #define _GNU_SOURCE
++#endif
+ 
+ #include <stdio.h>
+ #include <string.h>
+Index: e2fsprogs/misc/badblocks.c
+===================================================================
+--- e2fsprogs.orig/misc/badblocks.c
++++ e2fsprogs/misc/badblocks.c
+@@ -29,7 +29,9 @@
+  * 			 list.  (Work done by David Beattie)
+  */
+ 
++#ifndef _GNU_SOURCE
+ #define _GNU_SOURCE /* for O_DIRECT */
++#endif
+ 
+ #ifndef O_LARGEFILE
+ #define O_LARGEFILE 0
+Index: e2fsprogs/misc/e2undo.c
+===================================================================
+--- e2fsprogs.orig/misc/e2undo.c
++++ e2fsprogs/misc/e2undo.c
+@@ -29,12 +29,11 @@ unsigned char blksize_key[] = "filesyste
+ 
+ char *prg_name;
+ 
+-static void usage(char *prg_name)
++static void usage(void)
+ {
+ 	fprintf(stderr,
+ 		_("Usage: %s <transaction file> <filesystem>\n"), prg_name);
+ 	exit(1);
+-
+ }
+ 
+ static int check_filesystem(TDB_CONTEXT *tdb, io_channel channel)
+@@ -145,12 +144,12 @@ int main(int argc, char *argv[])
+ 				force = 1;
+ 				break;
+ 			default:
+-				usage(prg_name);
++				usage();
+ 		}
+ 	}
+ 
+-	if (argc != optind+2)
+-		usage(prg_name);
++	if (argc != optind + 2)
++		usage();
+ 
+ 	tdb_file = argv[optind];
+ 	device_name = argv[optind+1];
+Index: e2fsprogs/misc/tune2fs.8.in
+===================================================================
+--- e2fsprogs.orig/misc/tune2fs.8.in
++++ e2fsprogs/misc/tune2fs.8.in
+@@ -491,6 +491,10 @@ The following filesystem features can be
+ .B dir_index
+ Use hashed b-trees to speed up lookups in large directories.
+ .TP
++.B dir_nlink
++Allow directories to have more than 65000 subdirectories (read-only
++compatible).
++.TP
+ .B filetype
+ Store file type information in directory entries.
+ .TP
+Index: e2fsprogs/misc/tune2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/tune2fs.c
++++ e2fsprogs/misc/tune2fs.c
+@@ -348,7 +348,6 @@ static void update_feature_set(ext2_fils
+ {
+ 	struct ext2_super_block *sb = fs->super;
+ 	struct ext2_group_desc *gd;
+-	errcode_t	retval;
+ 	__u32		old_features[3];
+ 	int		i, type_err;
+ 	unsigned int	mask_err;
+@@ -1097,7 +1096,7 @@ static int move_block(ext2_filsys fs, ex
+ {
+ 
+ 	char *buf;
+-	dgrp_t group;
++	dgrp_t group = 0;
+ 	errcode_t retval;
+ 	int meta_data = 0;
+ 	blk64_t blk, new_blk, goal;

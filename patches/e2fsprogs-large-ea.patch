@@ -1,0 +1,604 @@
+Index: e2fsprogs/e2fsck/e2fsck.h
+===================================================================
+--- e2fsprogs.orig/e2fsck/e2fsck.h
++++ e2fsprogs/e2fsck/e2fsck.h
+@@ -263,6 +263,7 @@ struct e2fsck_struct {
+ 	ext2fs_inode_bitmap inode_bb_map; /* Inodes which are in bad blocks */
+ 	ext2fs_inode_bitmap inode_imagic_map; /* AFS inodes */
+ 	ext2fs_inode_bitmap inode_reg_map; /* Inodes which are regular files*/
++	ext2fs_inode_bitmap inode_ea_map; /* EA inodes which are non-orphan */
+ 
+ 	ext2fs_block_bitmap block_found_map; /* Blocks which are in use */
+ 	ext2fs_block_bitmap block_dup_map; /* Blks referenced more than once */
+Index: e2fsprogs/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass1.c
++++ e2fsprogs/e2fsck/pass1.c
+@@ -28,6 +28,7 @@
+  * 	- A bitmap of which blocks are in use.		(block_found_map)
+  * 	- A bitmap of which blocks are in use by two inodes	(block_dup_map)
+  * 	- The data blocks of the directory inodes.	(dir_map)
++ *	- A bitmap of EA inodes.			(inode_ea_map)
+  *
+  * Pass 1 is designed to stash away enough information so that the
+  * other passes should not need to read in the inode information
+@@ -270,6 +271,118 @@ static void check_size(e2fsck_t ctx, str
+ 	e2fsck_write_inode(ctx, pctx->ino, pctx->inode, "pass1");
+ }
+ 
++static void e2fsck_block_alloc_stats(ext2_filsys fs, blk64_t blk, int inuse)
++{
++	e2fsck_t ctx = (e2fsck_t) fs->priv_data;
++
++	if (ctx->block_found_map) {
++		if (inuse > 0)
++			ext2fs_mark_block_bitmap2(ctx->block_found_map, blk);
++		else
++			ext2fs_unmark_block_bitmap2(ctx->block_found_map, blk);
++	}
++}
++
++static void mark_inode_ea_map(e2fsck_t ctx, struct problem_context *pctx,
++			      ext2_ino_t ino)
++{
++	if (!ctx->inode_ea_map) {
++		pctx->errcode = ext2fs_allocate_inode_bitmap(ctx->fs,
++					 _("EA inode map"),
++					 &ctx->inode_ea_map);
++		if (pctx->errcode) {
++			fix_problem(ctx, PR_1_ALLOCATE_IBITMAP_ERROR,
++				    pctx);
++			exit(1);
++		}
++	}
++
++	ext2fs_mark_inode_bitmap2(ctx->inode_ea_map, ino);
++}
++
++/*
++ * Delete an EA entry. If this is the last entry to be deleted, then i_file_acl
++ * must have been freed, so we must update e2fsck block statistics and set
++ * i_file_acl_deleted.
++ * When we delete the entry successfully, this function returns 0, else
++ * non-zero value.
++ */
++
++static int e2fsck_ea_entry_delete(e2fsck_t ctx, struct ext2_ext_attr_entry *entry,
++				  struct problem_context *pctx,
++				  int *i_file_acl_deleted, problem_t prob)
++{
++	blk_t i_file_acl = pctx->inode->i_file_acl;
++	int err = 1;
++
++	pctx->num = entry->e_value_inum;
++
++	if (fix_problem(ctx, prob, pctx)) {
++		/* Delete corrupt EA entry */
++		err = ext2fs_attr_set(ctx->fs, pctx->ino, pctx->inode,
++				      entry->e_name_index, entry->e_name,
++				      0, 0, 0);
++		if (err == 0) {
++			if (i_file_acl && pctx->inode->i_file_acl == 0) {
++				e2fsck_block_alloc_stats(ctx->fs, i_file_acl, -1);
++				*i_file_acl_deleted = 1;
++			}
++			return 0;
++		}
++	}
++
++	return err;
++}
++
++/*
++ * Check validity of EA inode. Return 0 if EA inode is valid, nonzero otherwise.
++ */
++static int check_large_ea_inode(e2fsck_t ctx, struct ext2_ext_attr_entry *entry,
++				struct problem_context *pctx,
++				int *i_file_acl_deleted)
++{
++	struct ext2_inode inode;
++	int ret = 0;
++
++	/* Check if inode is within valid range */
++	if ((entry->e_value_inum < EXT2_FIRST_INODE(ctx->fs->super)) ||
++	    (entry->e_value_inum > ctx->fs->super->s_inodes_count)) {
++		ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
++					     i_file_acl_deleted,
++					     PR_1_ATTR_VALUE_EA_INODE);
++		/* If user refuses to delete this entry, caller may try to set
++		 * the bit for this out-of-bound inode in inode_ea_map, so
++		 * always return failure */
++		return 1;
++	}
++
++	e2fsck_read_inode(ctx, entry->e_value_inum, &inode, "pass1");
++	if (!(inode.i_flags & EXT4_EA_INODE_FL)) {
++		/* If EXT4_EA_INODE_FL flag is not present but back-pointer
++		 * matches then we should set this flag */
++		if (inode.i_mtime == pctx->ino &&
++		    inode.i_generation == pctx->inode->i_generation &&
++		    fix_problem(ctx, PR_1_ATTR_SET_EA_INODE_FL, pctx)) {
++			inode.i_flags |= EXT4_EA_INODE_FL;
++			ext2fs_write_inode(ctx->fs, entry->e_value_inum, &inode);
++		} else {
++			ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
++						     i_file_acl_deleted,
++						     PR_1_ATTR_NO_EA_INODE_FL);
++			goto out;
++		}
++	} else if (inode.i_mtime != pctx->ino ||
++		   inode.i_generation != pctx->inode->i_generation) {
++		ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
++					     i_file_acl_deleted,
++					     PR_1_ATTR_INVAL_EA_INODE);
++		goto out;
++	}
++
++out:
++	return ret;
++}
++
+ static void check_ea_in_inode(e2fsck_t ctx, struct problem_context *pctx)
+ {
+ 	struct ext2_super_block *sb = ctx->fs->super;
+@@ -307,18 +420,25 @@ static void check_ea_in_inode(e2fsck_t c
+ 		/* attribute len eats this space */
+ 		remain -= EXT2_EXT_ATTR_SIZE(entry->e_name_len);
+ 
+-		/* check value size */
+-		if (entry->e_value_size == 0 || entry->e_value_size > remain) {
++		if (entry->e_value_size == 0) {
+ 			pctx->num = entry->e_value_size;
+ 			problem = PR_1_ATTR_VALUE_SIZE;
+ 			goto fix;
+ 		}
+ 
+-		/* e_value_block must be 0 in inode's ea */
+-		if (entry->e_value_block != 0) {
+-			pctx->num = entry->e_value_block;
+-			problem = PR_1_ATTR_VALUE_BLOCK;
+-			goto fix;
++		if (entry->e_value_inum == 0) {
++			/* check value size */
++			if (entry->e_value_size > remain) {
++				pctx->num = entry->e_value_size;
++				problem = PR_1_ATTR_VALUE_SIZE;
++				goto fix;
++			}
++		} else {
++			int ret, tmp;
++
++			ret = check_large_ea_inode(ctx, entry, pctx, &tmp);
++			if (ret == 0)
++				mark_inode_ea_map(ctx, pctx, entry->e_value_inum);
+ 		}
+ 
+ 		/* Value size cannot be larger than EA space in inode */
+@@ -338,7 +458,10 @@ static void check_ea_in_inode(e2fsck_t c
+ 			goto fix;
+ 		}
+ 
+-		remain -= entry->e_value_size;
++		/* If EA value is stored in external inode then it does not
++		 * consume space here */
++		if (entry->e_value_inum == 0)
++			remain -= entry->e_value_size;
+ 
+ 		entry = EXT2_EXT_ATTR_NEXT(entry);
+ 	}
+@@ -627,7 +750,7 @@ int e2fsck_pass1_delete_attr(e2fsck_t ct
+ 		if (EXT2_EXT_IS_LAST_ENTRY(entry)) {
+ 			if (in_inode) {
+ 				entry = entry_blk;
+-			        len = sizeof(entry->e_name);
++				len = sizeof(entry->e_name);
+ 				entry_size = ext2fs_attr_get_next_attr(entry,
+ 							index, name, len, 1);
+ 				in_inode = 0;
+@@ -1657,6 +1780,7 @@ static int check_ext_attr(e2fsck_t ctx, 
+ 	struct ext2_ext_attr_entry *entry;
+ 	int		count;
+ 	region_t	region = 0;
++	int ret;
+ 
+ 	blk = ext2fs_file_acl_block(inode);
+ 	if (blk == 0)
+@@ -1778,19 +1902,27 @@ static int check_ext_attr(e2fsck_t ctx, 
+ 				goto clear_extattr;
+ 			break;
+ 		}
+-		if (entry->e_value_block != 0) {
+-			if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
+-				goto clear_extattr;
+-		}
+-		if (entry->e_value_offs + entry->e_value_size > fs->blocksize) {
+-			if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
+-				goto clear_extattr;
+-			break;
+-		}
+-		if (entry->e_value_size &&
+-		    region_allocate(region, entry->e_value_offs,
+-				    EXT2_EXT_ATTR_SIZE(entry->e_value_size))) {
+-			if (fix_problem(ctx, PR_1_EA_ALLOC_COLLISION, pctx))
++		if (entry->e_value_inum == 0) {
++			if (entry->e_value_offs + entry->e_value_size > fs->blocksize) {
++				if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
++					goto clear_extattr;
++				break;
++			}
++			if (entry->e_value_size &&
++			    region_allocate(region, entry->e_value_offs,
++					    EXT2_EXT_ATTR_SIZE(entry->e_value_size))) {
++				if (fix_problem(ctx, PR_1_EA_ALLOC_COLLISION, pctx))
++					goto clear_extattr;
++			}
++		} else {
++			int i_file_acl_deleted = 0;
++
++			ret = check_large_ea_inode(ctx, entry, pctx,
++						   &i_file_acl_deleted);
++			if (ret == 0)
++				mark_inode_ea_map(ctx, pctx, entry->e_value_inum);
++
++			if (i_file_acl_deleted)
+ 				goto clear_extattr;
+ 		}
+ 
+@@ -2998,18 +3130,6 @@ static errcode_t e2fsck_get_alloc_block(
+ 	return (0);
+ }
+ 
+-static void e2fsck_block_alloc_stats(ext2_filsys fs, blk64_t blk, int inuse)
+-{
+-	e2fsck_t ctx = (e2fsck_t) fs->priv_data;
+-
+-	if (ctx->block_found_map) {
+-		if (inuse > 0)
+-			ext2fs_mark_block_bitmap2(ctx->block_found_map, blk);
+-		else
+-			ext2fs_unmark_block_bitmap2(ctx->block_found_map, blk);
+-	}
+-}
+-
+ void e2fsck_use_inode_shortcuts(e2fsck_t ctx, int bool)
+ {
+ 	ext2_filsys fs = ctx->fs;
+Index: e2fsprogs/e2fsck/pass4.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass4.c
++++ e2fsprogs/e2fsck/pass4.c
+@@ -11,6 +11,7 @@
+  * Pass 4 frees the following data structures:
+  * 	- A bitmap of which inodes are in bad blocks.	(inode_bb_map)
+  * 	- A bitmap of which inodes are imagic inodes.	(inode_imagic_map)
++ *	- A bitmap of EA inodes.			(inode_ea_map)
+  */
+ 
+ #include "e2fsck.h"
+@@ -39,6 +40,20 @@ static int disconnect_inode(e2fsck_t ctx
+ 	} else {
+ 		e2fsck_read_inode(ctx, i, inode, "pass4: disconnect_inode");
+ 	}
++
++	if (inode->i_flags & EXT4_EA_INODE_FL) {
++		if (ext2fs_test_inode_bitmap2(ctx->inode_ea_map, i)) {
++			ext2fs_icount_store(ctx->inode_count, i, 1);
++			return 0;
++		} else {
++			/* Zero the link count so that when inode is linked to
++			 * lost+found it has correct link count */
++			inode->i_links_count = 0;
++			e2fsck_write_inode(ctx, i, inode, "disconnect_inode");
++			ext2fs_icount_store(ctx->inode_link_info, i, 0);
++		}
++	}
++
+ 	clear_problem_context(&pctx);
+ 	pctx.ino = i;
+ 	pctx.inode = inode;
+@@ -182,6 +197,8 @@ void e2fsck_pass4(e2fsck_t ctx)
+ 	ext2fs_free_icount(ctx->inode_link_info); ctx->inode_link_info = 0;
+ 	ext2fs_free_icount(ctx->inode_count); ctx->inode_count = 0;
+ 	ext2fs_free_icount(ctx->inode_badness); ctx->inode_badness = 0;
++	ext2fs_free_inode_bitmap(ctx->inode_ea_map);
++	ctx->inode_ea_map = 0;
+ 	ext2fs_free_inode_bitmap(ctx->inode_bb_map);
+ 	ctx->inode_bb_map = 0;
+ 	ext2fs_free_inode_bitmap(ctx->inode_imagic_map);
+Index: e2fsprogs/e2fsck/problem.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/problem.c
++++ e2fsprogs/e2fsck/problem.c
+@@ -969,6 +969,27 @@ static struct e2fsck_problem problem_tab
+ 	     "without deletion of an EA.\n"),
+ 	  PROMPT_FIX, 0 },
+ 
++	/* Inode has illegal extended attribute value inode */
++	{ PR_1_ATTR_VALUE_EA_INODE,
++	  N_("@i %i has @I @a value @i %N.\n"),
++	  PROMPT_FIX, PR_PREEN_OK },
++
++	/* Invalid backpointer from extended attribute inode to parent inode */
++	{ PR_1_ATTR_INVAL_EA_INODE,
++	  N_("@n backpointer from @a @i %N to parent @i %i.\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK },
++
++	/* Inode has invalid extended attribute. EA inode missing 
++	 * EA_INODE flag. */
++	{ PR_1_ATTR_NO_EA_INODE_FL,
++	  N_("@i %i has @n @a. EA @i %N missing EA_INODE flag.\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK },
++
++	/* EA inode for parent inode missing EA_INODE flag. */
++	{ PR_1_ATTR_SET_EA_INODE_FL,
++	  N_("EA @i %N for parent @i %i missing EA_INODE flag.\n "),
++	  PROMPT_FIX, PR_PREEN_OK },
++
+ 
+ 	/* Pass 1b errors */
+ 
+Index: e2fsprogs/e2fsck/problem.h
+===================================================================
+--- e2fsprogs.orig/e2fsck/problem.h
++++ e2fsprogs/e2fsck/problem.h
+@@ -570,6 +570,19 @@ struct problem_context {
+  */
+ #define PR_1_CLEAR_EXTRA_ISIZE		0x01006C
+ 
++/* Inode has illegal EA value inode */
++#define PR_1_ATTR_VALUE_EA_INODE	0x01006D
++
++/* Invalid backpointer from EA inode to parent inode */
++#define PR_1_ATTR_INVAL_EA_INODE	0x01006E
++
++/* Parent inode has invalid EA entry. EA inode does not have
++ * EXT4_EA_INODE_FL flag. Delete EA entry? */
++#define PR_1_ATTR_NO_EA_INODE_FL	0x01006F
++
++/* EA inode for parent inode does not have EXT4_EA_INODE_FL flag */
++#define PR_1_ATTR_SET_EA_INODE_FL	0x010070
++
+ /*
+  * Pass 1b errors
+  */
+Index: e2fsprogs/lib/blkid/probe.h
+===================================================================
+--- e2fsprogs.orig/lib/blkid/probe.h
++++ e2fsprogs/lib/blkid/probe.h
+@@ -119,6 +119,7 @@ struct ext2_super_block {
+ #define EXT4_FEATURE_INCOMPAT_64BIT		0x0080
+ #define EXT4_FEATURE_INCOMPAT_MMP		0x0100
+ #define EXT4_FEATURE_INCOMPAT_FLEX_BG		0x0200
++#define EXT4_FEATURE_INCOMPAT_EA_INODE		0x0400
+ 
+ #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
+ 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
+Index: e2fsprogs/lib/e2p/feature.c
+===================================================================
+--- e2fsprogs.orig/lib/e2p/feature.c
++++ e2fsprogs/lib/e2p/feature.c
+@@ -76,6 +76,8 @@ static struct feature feature_list[] = {
+ 			"flex_bg"},
+ 	{       E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP,
+ 			"mmp" },
++	{	E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_EA_INODE,
++			"large_xattr" },
+ 	{	0, 0, 0 },
+ };
+ 
+Index: e2fsprogs/lib/ext2fs/ext2_ext_attr.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2_ext_attr.h
++++ e2fsprogs/lib/ext2fs/ext2_ext_attr.h
+@@ -30,7 +30,7 @@ struct ext2_ext_attr_entry {
+ 	__u8	e_name_len;	/* length of name */
+ 	__u8	e_name_index;	/* attribute name index */
+ 	__u16	e_value_offs;	/* offset in disk block of value */
+-	__u32	e_value_block;	/* disk block attribute is stored on (n/i) */
++	__u32	e_value_inum;	/* inode in which the value is stored */
+ 	__u32	e_value_size;	/* size of attribute value */
+ 	__u32	e_hash;		/* hash value of name and value */
+ #if 1
+@@ -48,6 +48,9 @@ struct ext2_xattr_ibody_header {
+ 		    EXT2_GOOD_OLD_INODE_SIZE + (inode)->i_extra_isize))
+ #define ENTRY(ptr) ((struct ext2_ext_attr_entry *)(ptr))
+ 
++#define EXT4_XATTR_MIN_LARGE_EA_SIZE(b)	((b) >> 1)
++#define EXT4_XATTR_MAX_LARGE_EA_SIZE	(1024 * 1024)
++
+ /* Name indexes */
+ #define EXT2_ATTR_INDEX_USER			1
+ #define EXT2_ATTR_INDEX_POSIX_ACL_ACCESS	2
+Index: e2fsprogs/lib/ext2fs/ext2_fs.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2_fs.h
++++ e2fsprogs/lib/ext2fs/ext2_fs.h
+@@ -697,7 +697,8 @@ struct ext2_super_block {
+ 
+ #define EXT2_FEATURE_COMPAT_SUPP	0
+ #define EXT2_FEATURE_INCOMPAT_SUPP    (EXT2_FEATURE_INCOMPAT_FILETYPE| \
+-				       EXT4_FEATURE_INCOMPAT_MMP)
++				       EXT4_FEATURE_INCOMPAT_MMP|\
++				       EXT4_FEATURE_INCOMPAT_EA_INODE)
+ #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
+ 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
+ 					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
+Index: e2fsprogs/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs/lib/ext2fs/ext2fs.h
+@@ -571,6 +571,7 @@ typedef struct ext2_icount *ext2_icount_
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+ 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+ 					 EXT4_FEATURE_INCOMPAT_MMP|\
++					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
+ 					 EXT4_FEATURE_INCOMPAT_64BIT)
+ #else
+ #define EXT2_LIB_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE|\
+@@ -580,6 +581,7 @@ typedef struct ext2_icount *ext2_icount_
+ 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
+ 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+ 					 EXT4_FEATURE_INCOMPAT_MMP|\
++					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
+ 					 EXT4_FEATURE_INCOMPAT_64BIT)
+ #endif
+ #define EXT2_LIB_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER|\
+Index: e2fsprogs/lib/ext2fs/ext_attr.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext_attr.c
++++ e2fsprogs/lib/ext2fs/ext_attr.c
+@@ -45,7 +45,7 @@ __u32 ext2fs_ext_attr_hash_entry(struct 
+ 	}
+ 
+ 	/* The hash needs to be calculated on the data in little-endian. */
+-	if (entry->e_value_block == 0 && entry->e_value_size != 0) {
++	if (entry->e_value_inum == 0 && entry->e_value_size != 0) {
+ 		__u32 *value = (__u32 *)data;
+ 		for (n = (entry->e_value_size + EXT2_EXT_ATTR_ROUND) >>
+ 			 EXT2_EXT_ATTR_PAD_BITS; n; n--) {
+@@ -207,6 +207,7 @@ struct ext2_attr_ibody_find {
+ };
+ 
+ struct ext2_attr_block_find {
++	ext2_ino_t ino;
+ 	struct ext2_attr_search s;
+ 	char *block;
+ };
+@@ -219,7 +220,7 @@ void ext2fs_attr_shift_entries(struct ex
+ 
+ 	/* Adjust the value offsets of the entries */
+ 	for (; !EXT2_EXT_IS_LAST_ENTRY(last); last = EXT2_EXT_ATTR_NEXT(last)) {
+-		if (!last->e_value_block && last->e_value_size) {
++		if (last->e_value_inum == 0 && last->e_value_size) {
+ 			last->e_value_offs = last->e_value_offs +
+ 							value_offs_shift;
+ 		}
+@@ -240,7 +241,7 @@ int ext2fs_attr_free_space(struct ext2_e
+ {
+ 	for (; !EXT2_EXT_IS_LAST_ENTRY(last); last = EXT2_EXT_ATTR_NEXT(last)) {
+ 		*total += EXT2_EXT_ATTR_LEN(last->e_name_len);
+-		if (!last->e_value_block && last->e_value_size) {
++		if (last->e_value_inum == 0 && last->e_value_size) {
+ 			int offs = last->e_value_offs;
+ 			if (offs < *min_offs)
+ 				*min_offs = offs;
+@@ -376,7 +377,7 @@ static errcode_t ext2fs_attr_set_entry(e
+ 	/* Compute min_offs and last. */
+ 	for (last = s->first; !EXT2_EXT_IS_LAST_ENTRY(last);
+ 	     last = EXT2_EXT_ATTR_NEXT(last)) {
+-		if (!last->e_value_block && last->e_value_size) {
++		if (last->e_value_inum == 0 && last->e_value_size) {
+ 			int offs = last->e_value_offs;
+ 
+ 			if (offs < min_offs)
+@@ -386,7 +387,7 @@ static errcode_t ext2fs_attr_set_entry(e
+ 	free = min_offs - ((char *)last - s->base) - sizeof(__u32);
+ 
+ 	if (!s->not_found) {
+-		if (!s->here->e_value_block && s->here->e_value_size) {
++		if (s->here->e_value_inum == 0 && s->here->e_value_size) {
+ 			int size = s->here->e_value_size;
+ 			free += EXT2_EXT_ATTR_SIZE(size);
+ 		}
+@@ -409,7 +410,7 @@ static errcode_t ext2fs_attr_set_entry(e
+ 		s->here->e_name_len = name_len;
+ 		memcpy(s->here->e_name, i->name, name_len);
+ 	} else {
+-		if (!s->here->e_value_block && s->here->e_value_size) {
++		if (s->here->e_value_inum == 0 && s->here->e_value_size) {
+ 			char *first_val = s->base + min_offs;
+ 			int offs = s->here->e_value_offs;
+ 			char *val = s->base + offs;
+@@ -438,7 +439,7 @@ static errcode_t ext2fs_attr_set_entry(e
+ 			while (!EXT2_EXT_IS_LAST_ENTRY(last)) {
+ 				int o = last->e_value_offs;
+ 
+-				if (!last->e_value_block &&
++				if (last->e_value_inum == 0 &&
+ 				    last->e_value_size && o < offs)
+ 					last->e_value_offs = o + size;
+ 				last = EXT2_EXT_ATTR_NEXT(last);
+@@ -556,9 +557,20 @@ static errcode_t ext2fs_attr_block_set(e
+ 	/* Update the i_blocks if we added a new EA block */
+ 	if (!inode->i_file_acl && new_buf)
+ 		inode->i_blocks += fs->blocksize / 512;
++
++	/* Drop the previous xattr block. */
++	if (!new_buf) {
++		if (!fs->block_map)
++			ext2fs_read_block_bitmap(fs);
++		ext2fs_block_alloc_stats(fs, inode->i_file_acl, -1);
++		inode->i_blocks -= fs->blocksize / 512;
++	}
++
+ 	/* Update the inode. */
+ 	inode->i_file_acl = new_buf ? blk : 0;
+ 
++	ext2fs_write_inode(fs, bs->ino, inode);
++
+ cleanup:
+ 	if (clear_flag)
+ 		ext2fs_free_mem(&s->base);
+@@ -866,6 +878,7 @@ errcode_t ext2fs_expand_extra_isize(ext2
+ 		.s = { .not_found = EXT2_ET_EA_NO_SPACE, },
+ 	};
+ 	struct ext2_attr_block_find bs = {
++		.ino = ino,
+ 		.s = { .not_found = EXT2_ET_EA_NO_SPACE, },
+ 	};
+ 	char *start, *end, *block_buf = NULL, *buffer =NULL, *b_entry_name=NULL;
+Index: e2fsprogs/lib/ext2fs/swapfs.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/swapfs.c
++++ e2fsprogs/lib/ext2fs/swapfs.c
+@@ -151,7 +151,7 @@ void ext2fs_swap_ext_attr_entry(struct e
+ 				struct ext2_ext_attr_entry *from_entry)
+ {
+ 	to_entry->e_value_offs  = ext2fs_swab16(from_entry->e_value_offs);
+-	to_entry->e_value_block = ext2fs_swab32(from_entry->e_value_block);
++	to_entry->e_value_inum  = ext2fs_swab32(from_entry->e_value_inum);
+ 	to_entry->e_value_size  = ext2fs_swab32(from_entry->e_value_size);
+ 	to_entry->e_hash	= ext2fs_swab32(from_entry->e_hash);
+ }
+Index: e2fsprogs/misc/mke2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/mke2fs.c
++++ e2fsprogs/misc/mke2fs.c
+@@ -813,6 +813,7 @@ static __u32 ok_features[3] = {
+ 		EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|
+ 		EXT2_FEATURE_INCOMPAT_META_BG|
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG|
++		EXT4_FEATURE_INCOMPAT_EA_INODE|
+ 		EXT4_FEATURE_INCOMPAT_MMP |
+ 		EXT4_FEATURE_INCOMPAT_64BIT,
+ 	/* R/O compat */
+Index: e2fsprogs/misc/tune2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/tune2fs.c
++++ e2fsprogs/misc/tune2fs.c
+@@ -126,6 +126,7 @@ static __u32 ok_features[3] = {
+ 	EXT2_FEATURE_INCOMPAT_FILETYPE |
+ 		EXT3_FEATURE_INCOMPAT_EXTENTS |
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG |
++		EXT4_FEATURE_INCOMPAT_EA_INODE|
+ 		EXT4_FEATURE_INCOMPAT_MMP,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+@@ -144,6 +145,7 @@ static __u32 clear_ok_features[3] = {
+ 	/* Incompat */
+ 	EXT2_FEATURE_INCOMPAT_FILETYPE |
+ 		EXT4_FEATURE_INCOMPAT_FLEX_BG |
++		EXT4_FEATURE_INCOMPAT_EA_INODE|
+ 		EXT4_FEATURE_INCOMPAT_MMP,
+ 	/* R/O compat */
+ 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
+@@ -484,6 +486,9 @@ mmp_error:
+ 		sb->s_mmp_update_interval = 0;
+ 	}
+ 
++	if (FEATURE_ON(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_EA_INODE))
++		sb->s_feature_incompat |= EXT4_FEATURE_INCOMPAT_EA_INODE;
++
+ 	if (FEATURE_ON(E2P_FEATURE_COMPAT, EXT3_FEATURE_COMPAT_HAS_JOURNAL)) {
+ 		/*
+ 		 * If adding a journal flag, let the create journal

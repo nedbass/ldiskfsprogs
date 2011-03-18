@@ -1,0 +1,35 @@
+SLES upstream patch to remove init_error_table() (not thread safe).
+
+Index: e2fsprogs/lib/et/com_err.h
+===================================================================
+--- e2fsprogs.orig/lib/et/com_err.h
++++ e2fsprogs/lib/et/com_err.h
+@@ -42,7 +42,10 @@ extern void (*set_com_err_hook (void (*)
+ 	(const char *, long, const char *, va_list);
+ extern void (*reset_com_err_hook (void)) (const char *, long,
+ 					  const char *, va_list);
++#if 0
+ extern int init_error_table(const char * const *msgs, long base, int count);
++#endif
++#define init_error_table(...) PLEASE_DO_NOT_USE_init_error_table_FUNCTION
+ 
+ extern errcode_t add_error_table(const struct error_table * et);
+ extern errcode_t remove_error_table(const struct error_table * et);
+Index: e2fsprogs/lib/et/init_et.c
+===================================================================
+--- e2fsprogs.orig/lib/et/init_et.c
++++ e2fsprogs/lib/et/init_et.c
+@@ -16,6 +16,7 @@
+  * express or implied warranty.
+  */
+ 
++#if 0
+ #include <stdio.h>
+ #include <errno.h>
+ #ifdef HAVE_STDLIB_H
+@@ -50,3 +51,5 @@ int init_error_table(const char * const 
+     _et_dynamic_list = &new_et->etl;
+     return 0;
+ }
++#endif
++

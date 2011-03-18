@@ -1,0 +1,43 @@
+Index: e2fsprogs/misc/fsck.8.in
+===================================================================
+--- e2fsprogs.orig/misc/fsck.8.in
++++ e2fsprogs/misc/fsck.8.in
+@@ -8,7 +8,7 @@ fsck \- check and repair a Linux file sy
+ .SH SYNOPSIS
+ .B fsck
+ [
+-.B \-sAVRTMNP
++.B \-sAVRTmMNP
+ ]
+ [
+ .B \-C
+@@ -233,7 +233,7 @@ a progress bar at a time.  GUI front-end
+ .IR fd ,
+ in which case the progress bar information will be sent to that file descriptor.
+ .TP
+-.B \-M
++.B \-m or \-M
+ Do not check mounted filesystems and return an exit code of 0
+ for mounted filesystems.
+ .TP
+Index: e2fsprogs/misc/fsck.c
+===================================================================
+--- e2fsprogs.orig/misc/fsck.c
++++ e2fsprogs/misc/fsck.c
+@@ -1074,7 +1074,7 @@ static int check_all(NOARGS)
+ 
+ static void usage(NOARGS)
+ {
+-	fputs(_("Usage: fsck [-AMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
++	fputs(_("Usage: fsck [-AmMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
+ 	exit(EXIT_USAGE);
+ }
+ 
+@@ -1196,6 +1196,7 @@ static void PRS(int argc, char *argv[])
+ 			case 'T':
+ 				notitle++;
+ 				break;
++			case 'm':
+ 			case 'M':
+ 				ignore_mounted++;
+ 				break;

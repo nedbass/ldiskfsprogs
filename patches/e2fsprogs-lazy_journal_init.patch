@@ -1,0 +1,186 @@
+This patch adds the ability to skip zeroing the journal on disk.  This can
+significantly speed up mke2fs with large journals.  At worst the uninitialized
+journal is only a very short-term risk (if at all), because the journal will
+be overwritten on any new filesystem as soon as any significant amount of data
+is written to disk, unlike lazy_itable_init which can leave uninitialized
+itable blocks indefinitely (in the absence of the kernel init thread).
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/lib/ext2fs/ext2fs.h
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/ext2fs.h
++++ e2fsprogs/lib/ext2fs/ext2fs.h
+@@ -197,10 +197,9 @@ typedef struct ext2_file *ext2_file_t;
+ 
+ /*
+  * Flags for mkjournal
+- *
+- * EXT2_MKJOURNAL_V1_SUPER	Make a (deprecated) V1 journal superblock
+  */
+-#define EXT2_MKJOURNAL_V1_SUPER	0x0000001
++#define EXT2_MKJOURNAL_V1_SUPER	0x0000001 /* create V1 superblock (deprecated) */
++#define EXT2_MKJOURNAL_LAZYINIT	0x0000002 /* don't zero journal inode before use*/
+ 
+ struct opaque_ext2_group_desc;
+ 
+Index: e2fsprogs/lib/ext2fs/mkjournal.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/mkjournal.c
++++ e2fsprogs/lib/ext2fs/mkjournal.c
+@@ -103,7 +103,7 @@ static errcode_t write_journal_file(ext2
+ 	/* Open the device or journal file */
+ 	if ((fd = open(filename, O_WRONLY)) < 0) {
+ 		retval = errno;
+-		goto errout;
++		goto errfree;
+ 	}
+ 
+ 	/* Write the superblock out */
+@@ -117,6 +117,9 @@ static errcode_t write_journal_file(ext2
+ 		goto errout;
+ 	memset(buf, 0, fs->blocksize);
+ 
++	if (flags & EXT2_MKJOURNAL_LAZYINIT)
++		goto success;
++
+ 	for (i = 1; i < blocks; i++) {
+ 		ret_size = write(fd, buf, fs->blocksize);
+ 		if (ret_size < 0) {
+@@ -126,10 +129,12 @@ static errcode_t write_journal_file(ext2
+ 		if (ret_size != (int) fs->blocksize)
+ 			goto errout;
+ 	}
+-	close(fd);
+ 
++success:
+ 	retval = 0;
+ errout:
++	close(fd);
++errfree:
+ 	ext2fs_free_mem(&buf);
+ 	return retval;
+ }
+@@ -213,6 +218,7 @@ struct mkjournal_struct {
+ 	blk64_t		goal;
+ 	blk64_t		blk_to_zero;
+ 	int		zero_count;
++	int		flags;
+ 	char		*buf;
+ 	errcode_t	err;
+ };
+@@ -244,7 +250,7 @@ static int mkjournal_proc(ext2_filsys	fs
+ 	retval = 0;
+ 	if (blockcnt <= 0)
+ 		retval = io_channel_write_blk64(fs->io, new_blk, 1, es->buf);
+-	else {
++	else if (!(es->flags & EXT2_MKJOURNAL_LAZYINIT)) {
+ 		if (es->zero_count) {
+ 			if ((es->blk_to_zero + es->zero_count == new_blk) &&
+ 			    (es->zero_count < 1024))
+@@ -309,6 +315,7 @@ static errcode_t write_journal_inode(ext
+ 	es.newblocks = 0;
+ 	es.buf = buf;
+ 	es.err = 0;
++	es.flags = flags;
+ 	es.zero_count = 0;
+ 
+ 	if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS) {
+@@ -511,6 +518,13 @@ errcode_t ext2fs_add_journal_inode(ext2_
+ 		if ((fd = open(jfile, O_CREAT|O_WRONLY, 0600)) < 0)
+ 			return errno;
+ 
++		/* Note that we can't do lazy journal initialization for mounted
++		 * filesystems, since the zero writing is also allocating the
++		 * journal blocks.  We could use fallocate, but not all kernels
++		 * support that, and creating a journal on a mounted ext2
++		 * filesystems is extremely rare these days...  Skip it. */
++		flags &= ~EXT2_MKJOURNAL_LAZYINIT;
++
+ 		if ((retval = write_journal_file(fs, jfile, blocks, flags)))
+ 			goto errout;
+ 
+Index: e2fsprogs/misc/mke2fs.8.in
+===================================================================
+--- e2fsprogs.orig/misc/mke2fs.8.in
++++ e2fsprogs/misc/mke2fs.8.in
+@@ -232,7 +232,15 @@ This speeds up filesystem
+ initialization noticeably, but it requires the kernel to finish
+ initializing the filesystem in the background when the filesystem is
+ first mounted.  If the option value is omitted, it defaults to 1 to
+-enable lazy inode table initialization.
++enable lazy inode table zeroing.
++.TP
++.B lazy_journal_init\fR[\fB= \fI<0 to disable, 1 to enable>\fR]
++If enabled, the journal inode will not be fully zeroed out by
++.BR mke2fs .
++This speeds up filesystem initialization noticeably, but carries some
++small risk if the system crashes before the journal has been overwritten
++entirely one time.  If the option value is omitted, it defaults to 1 to
++enable lazy journal inode zeroing.
+ .TP
+ .B test_fs
+ Set a flag in the filesystem superblock indicating that it may be
+Index: e2fsprogs/misc/mke2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/mke2fs.c
++++ e2fsprogs/misc/mke2fs.c
+@@ -503,6 +503,10 @@ static void create_journal_dev(ext2_fils
+ 			_("while initializing journal superblock"));
+ 		exit(1);
+ 	}
++ 
++	if (journal_flags & EXT2_MKJOURNAL_LAZYINIT)
++		goto write_superblock;
++ 
+ 	ext2fs_numeric_progress_init(fs, &progress,
+ 				     _("Zeroing journal device: "),
+ 				     ext2fs_blocks_count(fs->super));
+@@ -527,6 +531,8 @@ static void create_journal_dev(ext2_fils
+ 	}
+ 	ext2fs_zero_blocks2(0, 0, 0, 0, 0);
+ 
++	ext2fs_numeric_progress_close(fs, &progress, NULL);
++write_superblock:
+ 	retval = io_channel_write_blk64(fs->io,
+ 					fs->super->s_first_data_block+1,
+ 					1, buf);
+@@ -535,7 +541,6 @@ static void create_journal_dev(ext2_fils
+ 			_("while writing journal superblock"));
+ 		exit(1);
+ 	}
+-	ext2fs_numeric_progress_close(fs, &progress, NULL);
+ }
+ 
+ static void show_stats(ext2_filsys fs)
+@@ -746,6 +751,12 @@ static void parse_extended_opts(struct e
+ 			}
+ 		} else if (!strcmp(token, "test_fs")) {
+ 			param->s_flags |= EXT2_FLAGS_TEST_FILESYS;
++		} else if (!strcmp(token, "lazy_journal_init")) {
++			if (arg)
++				journal_flags |= strtoul(arg, &p, 0) ?
++						EXT2_MKJOURNAL_LAZYINIT : 0;
++			else
++				journal_flags |= EXT2_MKJOURNAL_LAZYINIT;
+ 		} else if (!strcmp(token, "lazy_itable_init")) {
+ 			if (arg)
+ 				lazy_itable_init = strtoul(arg, &p, 0);
+@@ -770,6 +781,7 @@ static void parse_extended_opts(struct e
+ 			"\tstripe-width=<RAID stride * data disks in blocks>\n"
+ 			"\tresize=<resize maximum size in blocks>\n"
+ 			"\tlazy_itable_init=<0 to disable, 1 to enable>\n"
++			"\tlazy_journal_init=<0 to disable, 1 to enable>\n"
+ 			"\ttest_fs\n"
+ 			"\tdiscard\n"
+ 			"\tnodiscard\n\n"),
+@@ -1778,6 +1790,9 @@ profile_error:
+ 						 "lazy_itable_init",
+ 						 lazy_itable_init);
+ 	discard = get_bool_from_profile(fs_types, "discard" , discard);
++	journal_flags |= get_bool_from_profile(fs_types,
++					       "lazy_journal_init", 0) ?
++					       EXT2_MKJOURNAL_LAZYINIT : 0;
+ 
+ 	/* Get options from profile */
+ 	for (cpp = fs_types; *cpp; cpp++) {

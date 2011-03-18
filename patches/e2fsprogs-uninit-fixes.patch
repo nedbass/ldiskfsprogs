@@ -1,0 +1,36 @@
+Index: e2fsprogs/debugfs/set_fields.c
+===================================================================
+--- e2fsprogs.orig/debugfs/set_fields.c
++++ e2fsprogs/debugfs/set_fields.c
+@@ -583,6 +583,8 @@ void do_set_block_group_descriptor(int a
+ 				current_fs->group_desc, set_bg),
+ 		sizeof(set_gd));
+ 
++	set_sb = *current_fs->super;
++
+ 	if (ss->func(ss, argv[3]) == 0) {
+ 		memcpy(ext2fs_group_desc(current_fs,
+ 				current_fs->group_desc, set_bg),
+Index: e2fsprogs/misc/mke2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/mke2fs.c
++++ e2fsprogs/misc/mke2fs.c
+@@ -284,6 +284,9 @@ _("Warning: the backup superblock/group 
+ 				ext2fs_group_desc_csum_set(fs, group);
+ 				ext2fs_free_blocks_count_add(fs->super, 1);
+ 			}
++			/* The kernel doesn't need to zero the itable blocks */
++			ext2fs_bg_flags_set(fs, i, EXT2_BG_INODE_ZEROED |
++					    ext2fs_bg_flags(fs, i));
+ 		}
+ 		group_block += fs->super->s_blocks_per_group;
+ 	}
+@@ -2378,6 +2381,8 @@ int main (int argc, char *argv[])
+ 	}
+ no_journal:
+ 
++	if (!super_only)
++		ext2fs_set_gdt_csum(fs);
+ 	if (!quiet)
+ 		printf(_("Writing superblocks and "
+ 		       "filesystem accounting information: "));

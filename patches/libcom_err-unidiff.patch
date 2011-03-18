@@ -1,0 +1,15 @@
+diff -ru e2fsprogs-1.40.4/lib/et/Makefile.in e2fsprogs-cfs/lib/et/Makefile.in
+--- e2fsprogs-1.40.4/lib/et/Makefile.in
++++ e2fsprogs-cfs/lib/et/Makefile.in
+@@ -113,9 +113,9 @@
+ 	for i in $(srcdir)/test_cases/*.et ; do \
+ 		t=`basename $$i | sed -e 's/.et//'`; \
+ 		./compile_et --build-tree $$i ; \
+-		diff -c $(srcdir)/test_cases/$$t.c $$t.c > $$t.failed; \
++		diff @UNI_DIFF_OPTS@ $(srcdir)/test_cases/$$t.c $$t.c > $$t.failed; \
+ 		if [ $$? -ne 0 ]; then echo Test case $$t failed; exit 1 ; fi ; \
+-		diff -c $(srcdir)/test_cases/$$t.h $$t.h >> $$t.failed; \
++		diff @UNI_DIFF_OPTS@ $(srcdir)/test_cases/$$t.h $$t.h >> $$t.failed; \
+ 		if [ $$? -ne 0 ]; then echo Test case $$t failed; exit 1 ; fi ; \
+ 		$(RM) -f $$t.c $$t.h $$t.failed; \
+ 		echo "Test case $$t succeeded" ; \

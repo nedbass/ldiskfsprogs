@@ -1,0 +1,30 @@
+Running tune2fs on a filesystem with an unrecovered journal can cause
+the tune2fs settings to be reverted when the journal is replayed.  Print
+a warning if this is detected so that the user isn't surprised if it
+happens.
+
+Signed-off-by: Jim Garlick <garlick@llnl.gov>
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/misc/tune2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/tune2fs.c
++++ e2fsprogs/misc/tune2fs.c
+@@ -1855,6 +1855,17 @@ retry_open:
+ 		ext2fs_mark_super_dirty(fs);
+ 		printf(_("Setting stripe width to %d\n"), stripe_width);
+ 	}
++
++	/* Warn if file system needs recovery and it is opened for writing. */
++	if ((open_flag & EXT2_FLAG_RW) && !(mount_flags & EXT2_MF_MOUNTED) &&
++	    (sb->s_feature_compat & EXT3_FEATURE_COMPAT_HAS_JOURNAL) &&
++	    (sb->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER)) {
++		fprintf(stderr,
++			_("Warning: needs_recovery flag is set. You may wish\n"
++			  "replay the journal then rerun this command, or any\n"
++			  "changes may be overwritten by journal recovery.\n"));
++	}
++
+ 	free(device_name);
+ 	remove_error_table(&et_ext2_error_table);
+ 	return (ext2fs_close(fs) ? 1 : 0);

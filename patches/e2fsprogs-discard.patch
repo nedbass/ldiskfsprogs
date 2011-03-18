@@ -1,0 +1,82 @@
+Allow mke2fs discard patches to pass regression tests.
+
+Index: e2fsprogs/lib/ext2fs/unix_io.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/unix_io.c
++++ e2fsprogs/lib/ext2fs/unix_io.c
+@@ -870,8 +870,11 @@ static errcode_t unix_discard(io_channel
+ 	range[1] = (__uint64_t)(count) * channel->block_size;
+ 
+ 	ret = ioctl(data->dev, BLKDISCARD, &range);
+-	if (ret < 0)
++	if (ret < 0) {
++		if (errno == ENOTTY)
++			return EXT2_ET_UNIMPLEMENTED;
+ 		return errno;
++	}
+ 	return 0;
+ #else
+ 	return EXT2_ET_UNIMPLEMENTED;
+Index: e2fsprogs/misc/mke2fs.c
+===================================================================
+--- e2fsprogs.orig/misc/mke2fs.c
++++ e2fsprogs/misc/mke2fs.c
+@@ -2010,29 +2010,37 @@ static int mke2fs_discard_device(ext2_fi
+ 	count *= (1024 * 1024);
+ 	count /= fs->blocksize;
+ 
+-	ext2fs_numeric_progress_init(fs, &progress,
+-				     _("Discarding device blocks: "),
+-				     blocks);
+ 	while (cur < blocks) {
+-		ext2fs_numeric_progress_update(fs, &progress, cur);
+-
+ 		if (cur + count > blocks)
+ 			count = blocks - cur;
+ 
+ 		retval = io_channel_discard(fs->io, cur, count, fs->blocksize);
++		if (cur == 0) {
++			/* If discard is unimplemented skip the progress bar */
++			if (retval == EXT2_ET_UNIMPLEMENTED)
++				return retval;
++
++			ext2fs_numeric_progress_init(fs, &progress,
++						_("Discarding device blocks: "),
++						blocks);
++		}
++
++		ext2fs_numeric_progress_update(fs, &progress, cur);
++
+ 		if (retval)
+ 			break;
++
+ 		cur += count;
+ 	}
+ 
+ 	if (retval) {
+-		ext2fs_numeric_progress_close(fs, &progress,
+-				      _("failed - "));
++		ext2fs_numeric_progress_close(fs, &progress, _("failed - "));
+ 		if (!quiet)
+ 			printf("%s\n",error_message(retval));
+-	} else
++	} else {
+ 		ext2fs_numeric_progress_close(fs, &progress,
+ 				      _("done                            \n"));
++	}
+ 
+ 	return retval;
+ }
+Index: e2fsprogs/lib/et/Makefile.in
+===================================================================
+--- e2fsprogs.orig/lib/et/Makefile.in
++++ e2fsprogs/lib/et/Makefile.in
+@@ -96,7 +96,7 @@ install:: compile_et libcom_err.a $(HFIL
+ 		echo "	INSTALL_DATA $(includedir)/et/$$i"; \
+ 		$(INSTALL_DATA) $(srcdir)/$$i $(DESTDIR)$(includedir)/et/$$i; \
+ 	done
+-	$(Q) $(LN) $(LINK_INSTALL_FLAGS) $(includedir)/et/com_err.h $(DESTDIR)$(includedir)
++	$(Q) $(LN) $(LINK_INSTALL_FLAGS) -s $(includedir)/et/com_err.h $(DESTDIR)$(includedir)
+ 	$(Q) for i in $(SHARE_FILES); do \
+ 		echo "	INSTALL_DATA $(datadir)/et/$$i"; \
+ 		$(INSTALL_DATA) $(srcdir)/$$i $(DESTDIR)$(datadir)/et/$$i; \

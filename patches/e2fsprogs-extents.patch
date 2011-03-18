@@ -1,0 +1,396 @@
+The e2fsck_ext2fs_extent_get() part of this patch is a workaround to
+handle problems with old Lustre extents patches that didn't clear
+the ee_start_hi or ei_leaf_hi fields.
+
+That has been fixed for long time and could be removed as soon as the
+f_extent_* tests are fixed to clear these _hi fields.  Otherwise the
+extents are all marked as corrupt and it ruins those tests value.
+
+Index: e2fsprogs/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass1.c
++++ e2fsprogs/e2fsck/pass1.c
+@@ -138,7 +138,7 @@ int e2fsck_pass1_check_device_inode(ext2
+ 	 * If the index flag is set, then this is a bogus
+ 	 * device/fifo/socket
+ 	 */
+-	if (inode->i_flags & EXT2_INDEX_FL)
++	if (inode->i_flags & (EXT2_INDEX_FL | EXT4_EXTENTS_FL))
+ 		return 0;
+ 
+ 	/*
+@@ -175,7 +175,7 @@ int e2fsck_pass1_check_symlink(ext2_fils
+ 	struct ext2fs_extent	extent;
+ 
+ 	if ((inode->i_size_high || inode->i_size == 0) ||
+-	    (inode->i_flags & EXT2_INDEX_FL))
++	    (inode->i_flags & (EXT2_INDEX_FL | EXT4_EXTENTS_FL)))
+ 		return 0;
+ 
+ 	if (inode->i_flags & EXT4_EXTENTS_FL) {
+@@ -1054,8 +1054,7 @@ void e2fsck_pass1(e2fsck_t ctx)
+ 				check_blocks(ctx, &pctx, block_buf);
+ 				continue;
+ 			}
+-		}
+-		else if (LINUX_S_ISFIFO (inode->i_mode) &&
++		} else if (LINUX_S_ISFIFO (inode->i_mode) &&
+ 			 e2fsck_pass1_check_device_inode(fs, inode)) {
+ 			check_immutable(ctx, &pctx);
+ 			check_size(ctx, &pctx);
+@@ -1678,6 +1677,34 @@ void e2fsck_clear_inode(e2fsck_t ctx, ex
+ 	e2fsck_write_inode(ctx, ino, inode, source);
+ }
+ 
++/* Workaround to handle problems with old Lustre extents patches that didn't
++ * clear the ee_start_hi or ei_leaf_hi fields.  Could be removed as soon as
++ * the f_extent tests are fixed to clear these _hi fields. */
++static errcode_t e2fsck_ext2fs_extent_get(e2fsck_t ctx, struct problem_context *pctx,
++				     ext2_extent_handle_t ehandle, int flags,
++				     struct ext2fs_extent *extent)
++{
++	__u16 blk_hi;
++	int high_bits_ok = ext2fs_blocks_count(ctx->fs->super) > 0xffffffffULL;
++	int rc = 0;
++
++	rc = ext2fs_extent_get(ehandle, flags, extent);
++	if (rc)
++		return rc;
++
++	blk_hi = extent->e_pblk >> 32;
++
++	if (blk_hi && !high_bits_ok &&
++	    fix_problem(ctx, PR_1_EXTENT_HI, pctx)) {
++		extent->e_pblk &= 0xFFFFFFFFULL;
++		rc = ext2fs_extent_replace(ehandle, 0, extent);
++		if (rc)
++			return rc;
++	}
++
++	return rc;
++}
++
+ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
+ 			     struct process_block_struct *pb,
+ 			     blk64_t start_block,
+@@ -1695,8 +1722,8 @@ static void scan_extent_node(e2fsck_t ct
+ 	if (pctx->errcode)
+ 		return;
+ 
+-	pctx->errcode = ext2fs_extent_get(ehandle, EXT2_EXTENT_FIRST_SIB,
+-					  &extent);
++	pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx, ehandle,
++						 EXT2_EXTENT_FIRST_SIB, &extent);
+ 	while (!pctx->errcode && info.num_entries-- > 0) {
+ 		is_leaf = extent.e_flags & EXT2_EXTENT_FLAGS_LEAF;
+ 		is_dir = LINUX_S_ISDIR(pctx->inode->i_mode);
+@@ -1726,9 +1753,9 @@ static void scan_extent_node(e2fsck_t ct
+ 					pctx->str = "ext2fs_extent_delete";
+ 					return;
+ 				}
+-				pctx->errcode = ext2fs_extent_get(ehandle,
+-								  EXT2_EXTENT_CURRENT,
+-								  &extent);
++				pctx->errcode = e2fsck_ext2fs_extent_get(ctx,
++						pctx, ehandle,
++						EXT2_EXTENT_CURRENT, &extent);
+ 				if (pctx->errcode == EXT2_ET_NO_CURRENT_NODE) {
+ 					pctx->errcode = 0;
+ 					break;
+@@ -1740,8 +1767,8 @@ static void scan_extent_node(e2fsck_t ct
+ 
+ 		if (!is_leaf) {
+ 			blk = extent.e_pblk;
+-			pctx->errcode = ext2fs_extent_get(ehandle,
+-						  EXT2_EXTENT_DOWN, &extent);
++			pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx,
++					    ehandle, EXT2_EXTENT_DOWN, &extent);
+ 			if (pctx->errcode) {
+ 				pctx->str = "EXT2_EXTENT_DOWN";
+ 				problem = PR_1_EXTENT_HEADER_INVALID;
+@@ -1752,8 +1779,8 @@ static void scan_extent_node(e2fsck_t ct
+ 			scan_extent_node(ctx, pctx, pb, extent.e_lblk, ehandle);
+ 			if (pctx->errcode)
+ 				return;
+-			pctx->errcode = ext2fs_extent_get(ehandle,
+-						  EXT2_EXTENT_UP, &extent);
++			pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx,
++					      ehandle, EXT2_EXTENT_UP, &extent);
+ 			if (pctx->errcode) {
+ 				pctx->str = "EXT2_EXTENT_UP";
+ 				return;
+@@ -1818,9 +1845,9 @@ static void scan_extent_node(e2fsck_t ct
+ 		pb->previous_block = extent.e_pblk + extent.e_len - 1;
+ 		start_block = pb->last_block = extent.e_lblk + extent.e_len - 1;
+ 	next:
+-		pctx->errcode = ext2fs_extent_get(ehandle,
+-						  EXT2_EXTENT_NEXT_SIB,
+-						  &extent);
++		pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx, ehandle,
++							 EXT2_EXTENT_NEXT_SIB,
++							 &extent);
+ 	}
+ 	if (pctx->errcode == EXT2_ET_EXTENT_NO_NEXT)
+ 		pctx->errcode = 0;
+Index: e2fsprogs/e2fsck/problem.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/problem.c
++++ e2fsprogs/e2fsck/problem.c
+@@ -895,6 +895,21 @@ static struct e2fsck_problem problem_tab
+ 	  N_("@a in @i %i is corrupt (@n value)."),
+ 	  PROMPT_CLEAR, 0},
+ 
++	/* extent has high 16 bits set */
++	{ PR_1_EXTENT_HI,
++	  N_("High 16 bits of extent/index @b set\n"),
++	  PROMPT_CLEAR, PR_LATCH_EXTENT_HI|PR_PREEN_OK|PR_NO_OK|PR_PREEN_NOMSG},
++
++	/* extent has high 16 bits set header */
++	{ PR_1_EXTENT_HI_LATCH,
++	  N_("@i %i has high 16 bits of extent/index @b set\n"),
++	  PROMPT_CLEAR, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
++
++	/* eh_depth should be 0 */
++	{ PR_1_EXTENT_EH_DEPTH_BAD,
++	  N_("@i %i has extent header with incorrect eh_depth\n"),
++	  PROMPT_FIX, 0 },
++
+ 	/* Pass 1b errors */
+ 
+ 	/* Pass 1B: Rescan for duplicate/bad blocks */
+@@ -1661,6 +1676,7 @@ static struct latch_descr pr_latch_info[
+ 	{ PR_LATCH_TOOBIG, PR_1_INODE_TOOBIG, 0 },
+ 	{ PR_LATCH_OPTIMIZE_DIR, PR_3A_OPTIMIZE_DIR_HEADER, PR_3A_OPTIMIZE_DIR_END },
+ 	{ PR_LATCH_BG_CHECKSUM, PR_0_GDT_CSUM_LATCH, 0 },
++	{ PR_LATCH_EXTENT_HI, PR_1_EXTENT_HI_LATCH, 0 },
+ 	{ -1, 0, 0 },
+ };
+ 
+Index: e2fsprogs/e2fsck/problem.h
+===================================================================
+--- e2fsprogs.orig/e2fsck/problem.h
++++ e2fsprogs/e2fsck/problem.h
+@@ -39,6 +39,7 @@ struct problem_context {
+ #define PR_LATCH_TOOBIG	0x0080	/* Latch for file to big errors */
+ #define PR_LATCH_OPTIMIZE_DIR 0x0090 /* Latch for optimize directories */
+ #define PR_LATCH_BG_CHECKSUM 0x00A0  /* Latch for block group checksums */
++#define PR_LATCH_EXTENT_HI 0x00B0 /* Latch for extent high bits set */
+ 
+ #define PR_LATCH(x)	((((x) & PR_LATCH_MASK) >> 4) - 1)
+ 
+@@ -523,6 +524,15 @@ struct problem_context {
+ /* Bad extended attribute value in inode */
+ #define PR_1_INODE_EA_BAD_VALUE		0x010061
+ 
++/* extent/index has high 16 bits set - header */
++#define PR_1_EXTENT_HI			0x010062
++
++/* extent/index has high 16 bits set */
++#define PR_1_EXTENT_HI_LATCH		0x010063
++
++/* eh_depth for in-inode header is bad */
++#define PR_1_EXTENT_EH_DEPTH_BAD	0x010064
++
+ /*
+  * Pass 1b errors
+  */
+Index: e2fsprogs/lib/ext2fs/swapfs.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/swapfs.c
++++ e2fsprogs/lib/ext2fs/swapfs.c
+@@ -266,11 +266,13 @@ void ext2fs_swap_inode_full(ext2_filsys 
+ 	if (bufsize < (int) (sizeof(struct ext2_inode) + sizeof(__u16)))
+ 		return; /* no i_extra_isize field */
+ 
+-	if (hostorder)
++	if (hostorder) {
+ 		extra_isize = f->i_extra_isize;
+-	t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
+-	if (!hostorder)
++		t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
++	} else {
++		t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
+ 		extra_isize = t->i_extra_isize;
++	}
+ 	if (extra_isize > EXT2_INODE_SIZE(fs->super) -
+ 				sizeof(struct ext2_inode)) {
+ 		/* this is error case: i_extra_size is too large */
+Index: e2fsprogs/lib/ext2fs/valid_blk.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/valid_blk.c
++++ e2fsprogs/lib/ext2fs/valid_blk.c
+@@ -18,6 +18,7 @@
+ 
+ #include "ext2_fs.h"
+ #include "ext2fs.h"
++#include "ext3_extents.h"
+ 
+ /*
+  * This function returns 1 if the inode's block entries actually
+@@ -40,12 +41,23 @@ int ext2fs_inode_has_valid_blocks(struct
+ 	if (LINUX_S_ISLNK (inode->i_mode)) {
+ 		if (ext2fs_file_acl_block(inode) == 0) {
+ 			/* With no EA block, we can rely on i_blocks */
+-			if (inode->i_blocks == 0)
+-				return 0;
++			if (inode->i_flags & EXT4_EXTENTS_FL) {
++				struct ext3_extent_header *eh;
++				eh = (struct ext3_extent_header *)inode->i_block;
++				if (eh->eh_entries == 0)
++					return 0;
++			} else {
++				if (inode->i_blocks == 0)
++					return 0;
++			}
+ 		} else {
+ 			/* With an EA block, life gets more tricky */
+ 			if (inode->i_size >= EXT2_N_BLOCKS*4)
+ 				return 1; /* definitely using i_block[] */
++			/*
++			 * we cannot have EA + extents, so assume we are not
++			 * using extents
++			 */
+ 			if (inode->i_size > 4 && inode->i_block[1] == 0)
+ 				return 1; /* definitely using i_block[] */
+ 			return 0; /* Probably a fast symlink */
+Index: e2fsprogs/tests/f_extents/expect.1
+===================================================================
+--- e2fsprogs.orig/tests/f_extents/expect.1
++++ e2fsprogs/tests/f_extents/expect.1
+@@ -2,51 +2,68 @@ Pass 1: Checking inodes, blocks, and siz
+ Inode 12 is in extent format, but superblock is missing EXTENTS feature
+ Fix? yes
+ 
+-Inode 12 has an invalid extent
+-	(logical block 0, invalid physical block 21994527527949, len 17)
++Inode 12 has high 16 bits of extent/index block set
+ Clear? yes
+ 
+-Inode 12, i_blocks is 34, should be 0.  Fix? yes
+-
++High 16 bits of extent/index block set
++CLEARED.
+ Inode 13 missing EXTENT_FL, but is in extents format
+ Fix? yes
+ 
+-Inode 17 has an invalid extent
+-	(logical block 0, invalid physical block 22011707397135, len 15)
+-Clear? yes
+-
+-Inode 17, i_blocks is 32, should be 0.  Fix? yes
+-
++High 16 bits of extent/index block set
++CLEARED.
+ Error while reading over extent tree in inode 18: Corrupt extent header
+ Clear inode? yes
+ 
+ Inode 18, i_blocks is 2, should be 0.  Fix? yes
+ 
++
++Running additional passes to resolve blocks claimed by more than one inode...
++Pass 1B: Rescanning for multiply-claimed blocks
++Multiply-claimed block(s) in inode 12: 5133 5124 5125 5129 5132 5133 5142 5143 5144 5145
++Multiply-claimed block(s) in inode 17: 5124 5125 5129 5132 5142 5143 5144 5145
++Pass 1C: Scanning directories for inodes with multiply-claimed blocks
++Pass 1D: Reconciling multiply-claimed blocks
++(There are 2 inodes containing multiply-claimed blocks.)
++
++File /fdup1 (inode #12, mod time Wed Jul  5 21:55:26 2006) 
++  has 10 multiply-claimed block(s), shared with 1 file(s):
++	/fdup2 (inode #17, mod time Wed Jul  5 21:55:27 2006)
++Clone multiply-claimed blocks? yes
++
++File /fdup2 (inode #17, mod time Wed Jul  5 21:55:27 2006) 
++  has 8 multiply-claimed block(s), shared with 1 file(s):
++	/fdup1 (inode #12, mod time Wed Jul  5 21:55:26 2006)
++Multiply-claimed blocks already reassigned or cloned.
++
+ Pass 2: Checking directory structure
+ Entry 'fbad-flag' in / (2) has deleted/unused inode 18.  Clear? yes
+ 
++Inode 19 (/fbad-sock) is an illegal FIFO.
++Clear? yes
++
+ Pass 3: Checking directory connectivity
+ Pass 4: Checking reference counts
+ Pass 5: Checking group summary information
+-Block bitmap differences:  -1081 +4611 -(5121--5142)
++Block bitmap differences:  +4611 -(5121--5122) +(5143--5146)
+ Fix? yes
+ 
+-Free blocks count wrong for group #0 (7081, counted=7098).
++Free blocks count wrong for group #0 (7081, counted=7065).
+ Fix? yes
+ 
+-Free blocks count wrong (7081, counted=7098).
++Free blocks count wrong (7081, counted=7065).
+ Fix? yes
+ 
+ Inode bitmap differences:  -18
+ Fix? yes
+ 
+-Free inodes count wrong for group #0 (237, counted=238).
++Free inodes count wrong for group #0 (238, counted=239).
+ Fix? yes
+ 
+-Free inodes count wrong (237, counted=238).
++Free inodes count wrong (238, counted=239).
+ Fix? yes
+ 
+ 
+ test_filesys: ***** FILE SYSTEM WAS MODIFIED *****
+-test_filesys: 18/256 files (0.0% non-contiguous), 1094/8192 blocks
++test_filesys: 17/256 files (11.8% non-contiguous), 1127/8192 blocks
+ Exit status is 1
+Index: e2fsprogs/tests/f_extents/expect.2
+===================================================================
+--- e2fsprogs.orig/tests/f_extents/expect.2
++++ e2fsprogs/tests/f_extents/expect.2
+@@ -3,5 +3,5 @@ Pass 2: Checking directory structure
+ Pass 3: Checking directory connectivity
+ Pass 4: Checking reference counts
+ Pass 5: Checking group summary information
+-test_filesys: 18/256 files (0.0% non-contiguous), 1094/8192 blocks
++test_filesys: 17/256 files (11.8% non-contiguous), 1127/8192 blocks
+ Exit status is 0
+Index: e2fsprogs/tests/f_fast_symlink_extents/expect.1
+===================================================================
+--- e2fsprogs.orig/tests/f_fast_symlink_extents/expect.1
++++ e2fsprogs/tests/f_fast_symlink_extents/expect.1
+@@ -1,11 +1,23 @@
+ Pass 1: Checking inodes, blocks, and sizes
+-Fast symlink 13 has EXTENT_FL set.  Clear? yes
++Error while reading over extent tree in inode 13: Corrupt extent header
++Clear inode? yes
+ 
+ Pass 2: Checking directory structure
++Entry 'bar' in / (2) has deleted/unused inode 13.  Clear? yes
++
+ Pass 3: Checking directory connectivity
+ Pass 4: Checking reference counts
+ Pass 5: Checking group summary information
++Inode bitmap differences:  -13
++Fix? yes
++
++Free inodes count wrong for group #0 (3, counted=4).
++Fix? yes
++
++Free inodes count wrong (3, counted=4).
++Fix? yes
++
+ 
+ test_filesys: ***** FILE SYSTEM WAS MODIFIED *****
+-test_filesys: 13/16 files (0.0% non-contiguous), 21/100 blocks
++test_filesys: 12/16 files (0.0% non-contiguous), 21/100 blocks
+ Exit status is 1
+Index: e2fsprogs/tests/f_fast_symlink_extents/expect.2
+===================================================================
+--- e2fsprogs.orig/tests/f_fast_symlink_extents/expect.2
++++ e2fsprogs/tests/f_fast_symlink_extents/expect.2
+@@ -3,5 +3,5 @@ Pass 2: Checking directory structure
+ Pass 3: Checking directory connectivity
+ Pass 4: Checking reference counts
+ Pass 5: Checking group summary information
+-test_filesys: 13/16 files (0.0% non-contiguous), 21/100 blocks
++test_filesys: 12/16 files (0.0% non-contiguous), 21/100 blocks
+ Exit status is 0

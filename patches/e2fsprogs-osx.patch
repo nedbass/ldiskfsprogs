@@ -1,0 +1,64 @@
+The BLKFLSBUF and FDFLUSH ioctls are Linux specific, and do not
+really have anything to do with __GNUC__ (which is also used on
+OS/X and Solaris).  No need to print these warnings on OS/X.
+
+O_DIRECT is not defined in the OS/X headers.  Since this is only a
+performance enhancement, and not required for correct operation,
+just ignore it if undefined.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/lib/ext2fs/flushb.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/flushb.c
++++ e2fsprogs/lib/ext2fs/flushb.c
+@@ -65,17 +65,13 @@ errcode_t ext2fs_sync_device(int fd, int
+ #ifdef BLKFLSBUF
+ 		if (ioctl (fd, BLKFLSBUF, 0) == 0)
+ 			return 0;
+-#else
+-#ifdef __GNUC__
+- #warning BLKFLSBUF not defined
+-#endif /* __GNUC__ */
++#elif defined(__linux__)
++#warning BLKFLSBUF not defined
+ #endif
+ #ifdef FDFLUSH
+ 		ioctl (fd, FDFLUSH, 0);   /* In case this is a floppy */
+-#else
+-#ifdef __GNUC__
+- #warning FDFLUSH not defined
+-#endif /* __GNUC__ */
++#elif defined(__linux__)
++#warning FDFLUSH not defined
+ #endif
+ 	}
+ 	return 0;
+Index: e2fsprogs/lib/ext2fs/getsize.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/getsize.c
++++ e2fsprogs/lib/ext2fs/getsize.c
+@@ -235,7 +235,7 @@ errcode_t ext2fs_get_device_size2(const 
+ #endif /* HAVE_SYS_DISKLABEL_H */
+ 
+ 	{
+-#ifdef HAVE_FSTAT64
++#if defined(HAVE_FSTAT64) && !defined(__OSX__)
+ 		struct stat64   st;
+ 		if (fstat64(fd, &st) == 0)
+ #else
+Index: e2fsprogs/lib/ext2fs/unix_io.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/unix_io.c
++++ e2fsprogs/lib/ext2fs/unix_io.c
+@@ -474,8 +474,10 @@ static errcode_t unix_open(const char *n
+ 	open_flags = (flags & IO_FLAG_RW) ? O_RDWR : O_RDONLY;
+ 	if (flags & IO_FLAG_EXCLUSIVE)
+ 		open_flags |= O_EXCL;
++#ifdef O_DIRECT
+ 	if (flags & IO_FLAG_DIRECT_IO)
+ 		open_flags |= O_DIRECT;
++#endif
+ 	data->flags = flags;
+ 
+ #ifdef HAVE_OPEN64

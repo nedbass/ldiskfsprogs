@@ -1,0 +1,52 @@
+Don't consider only an error in the superblock summary as incorrect.
+The kernel does not update this field except at unmount time.  Any
+other unfixed errors will themselves mark the filesystem invalid.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/e2fsck/pass5.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass5.c
++++ e2fsprogs/e2fsck/pass5.c
+@@ -401,8 +401,7 @@ redo_counts:
+ 		if (fix_problem(ctx, PR_5_FREE_BLOCK_COUNT, &pctx)) {
+ 			ext2fs_free_blocks_count_set(fs->super, free_blocks);
+ 			ext2fs_mark_super_dirty(fs);
+-		} else
+-			ext2fs_unmark_valid(fs);
++		}
+ 	}
+ errout:
+ 	ext2fs_free_mem(&free_array);
+@@ -679,8 +678,7 @@ do_counts:
+ 		if (fix_problem(ctx, PR_5_FREE_INODE_COUNT, &pctx)) {
+ 			fs->super->s_free_inodes_count = free_inodes;
+ 			ext2fs_mark_super_dirty(fs);
+-		} else
+-			ext2fs_unmark_valid(fs);
++		}
+ 	}
+ errout:
+ 	ext2fs_free_mem(&free_array);
+Index: e2fsprogs/e2fsck/problem.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/problem.c
++++ e2fsprogs/e2fsck/problem.c
+@@ -1571,7 +1571,7 @@ static struct e2fsck_problem problem_tab
+ 	/* Free inodes count wrong */
+ 	{ PR_5_FREE_INODE_COUNT,
+ 	  N_("Free @is count wrong (%i, counted=%j).\n"),
+-	  PROMPT_FIX, PR_PREEN_OK | PR_PREEN_NOMSG },
++	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
+ 
+ 	/* Free blocks count for group wrong */
+ 	{ PR_5_FREE_BLOCK_COUNT_GROUP,
+@@ -1581,7 +1581,7 @@ static struct e2fsck_problem problem_tab
+ 	/* Free blocks count wrong */
+ 	{ PR_5_FREE_BLOCK_COUNT,
+ 	  N_("Free @bs count wrong (%b, counted=%c).\n"),
+-	  PROMPT_FIX, PR_PREEN_OK | PR_PREEN_NOMSG },
++	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
+ 
+ 	/* Programming error: bitmap endpoints don't match */
+ 	{ PR_5_BMAP_ENDPOINTS,

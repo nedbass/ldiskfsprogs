@@ -1,0 +1,117 @@
+Access inode size via EXT2_I_SIZE() instead of using i_size directly,
+so that files larger than 4GB are correctly handled.
+
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/debugfs/debugfs.c
+===================================================================
+--- e2fsprogs.orig/debugfs/debugfs.c
++++ e2fsprogs/debugfs/debugfs.c
+@@ -722,12 +722,9 @@ void internal_dump_inode(FILE *out, cons
+ 	}
+ 	fprintf(out, "%sUser: %5d   Group: %5d   Size: ",
+ 		prefix, inode_uid(*inode), inode_gid(*inode));
+-	if (LINUX_S_ISREG(inode->i_mode)) {
+-		unsigned long long i_size = (inode->i_size |
+-				    ((unsigned long long)inode->i_size_high << 32));
+-
+-		fprintf(out, "%llu\n", i_size);
+-	} else
++	if (LINUX_S_ISREG(inode->i_mode))
++		fprintf(out, "%llu\n", EXT2_I_SIZE(inode));
++	else
+ 		fprintf(out, "%d\n", inode->i_size);
+ 	if (os == EXT2_OS_HURD)
+ 		fprintf(out,
+@@ -901,9 +898,7 @@ void do_dump_extents(int argc, char **ar
+ 		return;
+ 	}
+ 
+-	logical_width = int_log10(((inode.i_size |
+-				    (__u64) inode.i_size_high << 32) +
+-				   current_fs->blocksize - 1) /
++	logical_width = int_log10((EXT2_I_SIZE(&inode)+current_fs->blocksize-1)/
+ 				  current_fs->blocksize) + 1;
+ 	if (logical_width < 5)
+ 		logical_width = 5;
+Index: e2fsprogs/debugfs/ls.c
+===================================================================
+--- e2fsprogs.orig/debugfs/ls.c
++++ e2fsprogs/debugfs/ls.c
+@@ -79,7 +79,7 @@ static int list_dir_proc(ext2_ino_t dir 
+ 		if (LINUX_S_ISDIR(inode.i_mode))
+ 			fprintf(ls->f, "/");
+ 		else
+-			fprintf(ls->f, "%lld/", inode.i_size | ((__u64)inode.i_size_high << 32));
++			fprintf(ls->f, "%lld/", EXT2_I_SIZE(&inode));
+ 		fprintf(ls->f, "\n");
+ 	}
+ 	else if (ls->options & LONG_OPT) {
+@@ -102,8 +102,7 @@ static int list_dir_proc(ext2_ino_t dir 
+ 		if (LINUX_S_ISDIR(inode.i_mode))
+ 			fprintf(ls->f, "%5d", inode.i_size);
+ 		else
+-			fprintf(ls->f, "%5llu", inode.i_size |
+-				((unsigned long long) inode.i_size_high << 32));
++			fprintf(ls->f, "%5llu", EXT2_I_SIZE(&inode));
+ 		fprintf (ls->f, " %s %s\n", datestr, name);
+ 	} else {
+ 		sprintf(tmp, "%c%u%c (%d) %s   ", lbr, dirent->inode, rbr,
+Index: e2fsprogs/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass1.c
++++ e2fsprogs/e2fsck/pass1.c
+@@ -2033,8 +2033,7 @@ static void check_blocks(e2fsck_t ctx, s
+ 		}
+ 		pctx->num = 0;
+ 	}
+-	if (LINUX_S_ISREG(inode->i_mode) &&
+-	    (inode->i_size_high || inode->i_size & 0x80000000UL))
++	if (LINUX_S_ISREG(inode->i_mode) && EXT2_I_SIZE(inode) >= 0x80000000UL)
+ 		ctx->large_files++;
+ 	if ((pb.num_blocks != ext2fs_inode_i_blocks(fs, inode)) ||
+ 	    ((fs->super->s_feature_ro_compat &
+Index: e2fsprogs/e2fsck/pass2.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass2.c
++++ e2fsprogs/e2fsck/pass2.c
+@@ -1220,8 +1220,7 @@ static void deallocate_inode(e2fsck_t ct
+ 	if (!ext2fs_inode_has_valid_blocks(&inode))
+ 		return;
+ 
+-	if (LINUX_S_ISREG(inode.i_mode) &&
+-	    (inode.i_size_high || inode.i_size & 0x80000000UL))
++	if (LINUX_S_ISREG(inode.i_mode) && EXT2_I_SIZE(&inode) >= 0x80000000UL)
+ 		ctx->large_files--;
+ 
+ 	pctx.errcode = ext2fs_block_iterate3(fs, ino, 0, block_buf,
+Index: e2fsprogs/e2fsck/super.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/super.c
++++ e2fsprogs/e2fsck/super.c
+@@ -170,8 +170,7 @@ static int release_inode_blocks(e2fsck_t
+ 	if (inode->i_links_count) {
+ 		pb.truncating = 1;
+ 		pb.truncate_block = (e2_blkcnt_t)
+-			((((long long)inode->i_size_high << 32) +
+-			  inode->i_size + fs->blocksize - 1) /
++			((EXT2_I_SIZE(inode) + fs->blocksize - 1) /
+ 			 fs->blocksize);
+ 		pb.truncate_offset = inode->i_size % fs->blocksize;
+ 	} else {
+Index: e2fsprogs/lib/ext2fs/extent.c
+===================================================================
+--- e2fsprogs.orig/lib/ext2fs/extent.c
++++ e2fsprogs/lib/ext2fs/extent.c
+@@ -253,9 +253,8 @@ extern errcode_t ext2fs_extent_open2(ext
+ 	handle->path[0].max_entries = ext2fs_le16_to_cpu(eh->eh_max);
+ 	handle->path[0].curr = 0;
+ 	handle->path[0].end_blk =
+-		((((__u64) handle->inode->i_size_high << 32) +
+-		  handle->inode->i_size + (fs->blocksize - 1))
+-		 >> EXT2_BLOCK_SIZE_BITS(fs->super));
++		(EXT2_I_SIZE(handle->inode) + fs->blocksize - 1) >>
++		 EXT2_BLOCK_SIZE_BITS(fs->super);
+ 	handle->path[0].visit_num = 1;
+ 	handle->level = 0;
+ 	handle->magic = EXT2_ET_MAGIC_EXTENT_HANDLE;

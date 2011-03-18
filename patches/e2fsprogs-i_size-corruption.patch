@@ -1,0 +1,21 @@
+Fix handling of block preallocation support in cases where the kernel
+PAGE_SIZE is larger than the filesystem blocksize.
+
+Signed-off-by: Kalpak Shah <kalpak@clusterfs.com>
+Signed-off-by: Andreas Dilger <adilger@whamcloud.com>
+
+Index: e2fsprogs/e2fsck/pass1.c
+===================================================================
+--- e2fsprogs.orig/e2fsck/pass1.c
++++ e2fsprogs/e2fsck/pass1.c
+@@ -2273,8 +2273,8 @@ static void check_blocks(e2fsck_t ctx, s
+ 		if ((pb.last_block >= 0) &&
+ 		    /* allow allocated blocks to end of PAGE_SIZE */
+ 		    (size < (__u64)pb.last_block * fs->blocksize) &&
+-		    (pb.last_block / blkpg * blkpg != pb.last_block ||
+-		     size < (__u64)(pb.last_block & ~(blkpg-1)) *fs->blocksize) &&
++		    ((pb.last_block + 1) / blkpg * blkpg != (pb.last_block+1) ||
++		     size < (__u64)(pb.last_block & ~(blkpg-1))*fs->blocksize)&&
+ 		    !(inode->i_flags & EXT4_EOFBLOCKS_FL))
+ 			bad_size = 3;
+ 		else if (!(extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) &&
