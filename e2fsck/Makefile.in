@@ -12,30 +12,35 @@ INSTALL = @INSTALL@
 @MCONFIG@
 
 PROGS=		e2fsck
+@LFSCK_CMT@USPROGS= lfsck
 MANPAGES=	e2fsck.8
 FMANPAGES=	e2fsck.conf.5
+@LFSCK_CMT@MANPAGES   += lfsck.8
 XTRA_CFLAGS=	-DRESOURCE_TRACK -I.
 
-LIBS= $(LIBEXT2FS) $(LIBCOM_ERR) $(LIBBLKID) $(LIBUUID) $(LIBINTL) $(LIBE2P)
+@LFSCK_CMT@LFSCK_LIBS=-ldb-@DB4VERSION@
+@LFSCK_CMT@LUSTRE_INC=-I @LUSTRE@/lustre/include -Wall
+@LFSCK_CMT@LUSTRE_LIB=-L @LUSTRE@/lustre/utils
+LIBS= $(LIBEXT2FS) $(LIBCOM_ERR) $(LIBBLKID) $(LIBUUID) $(LIBINTL) $(LIBE2P) $(LFSCK_LIBS)
 DEPLIBS= $(LIBEXT2FS) $(DEPLIBCOM_ERR) $(DEPLIBBLKID) $(DEPLIBUUID) \
-	$(DEPLIBE2P)
+	$(DEPLIBE2P) $(LFSCK_LIBS)
 
 STATIC_LIBS= $(STATIC_LIBEXT2FS) $(STATIC_LIBCOM_ERR) $(STATIC_LIBBLKID) \
-	$(STATIC_LIBUUID) $(LIBINTL) $(STATIC_LIBE2P)
+	$(STATIC_LIBUUID) $(LIBINTL) $(STATIC_LIBE2P) $(LFSCK_LIBS)
 STATIC_DEPLIBS= $(STATIC_LIBEXT2FS) $(DEPSTATIC_LIBCOM_ERR) \
-	$(DEPSTATIC_LIBBLKID) $(DEPSTATIC_LIBUUID) $(DEPSTATIC_LIBE2P)
+	$(DEPSTATIC_LIBBLKID) $(DEPSTATIC_LIBUUID) $(DEPSTATIC_LIBE2P) $(LFSCK_LIBS)
 
 PROFILED_LIBS= $(PROFILED_LIBEXT2FS) $(PROFILED_LIBCOM_ERR) \
-	$(PROFILED_LIBBLKID) $(PROFILED_LIBUUID) $(PROFILED_LIBE2P) $(LIBINTL)
+	$(PROFILED_LIBBLKID) $(PROFILED_LIBUUID) $(PROFILED_LIBE2P) $(LIBINTL) $(LFSCK_LIBS)
 PROFILED_DEPLIBS= $(PROFILED_LIBEXT2FS) $(DEPPROFILED_LIBCOM_ERR) \
-	$(DEPPROFILED_LIBBLKID) $(DEPPROFILED_LIBUUID) $(DEPPROFILED_LIBE2P)
+	$(DEPPROFILED_LIBBLKID) $(DEPPROFILED_LIBUUID) $(DEPPROFILED_LIBE2P) $(LFSCK_LIBS)
 
 COMPILE_ET=$(top_builddir)/lib/et/compile_et --build-tree
 
 .c.o:
 	$(E) "	CC $<"
-	$(Q) $(CC) -c $(ALL_CFLAGS) $< -o $@
-@PROFILE_CMT@	$(Q) $(CC) $(ALL_CFLAGS) -g -pg -o profiled/$*.o -c $<
+	$(Q) $(CC) -c $(ALL_CFLAGS) $(LUSTRE_INC) $< -o $@
+@PROFILE_CMT@	$(Q) $(CC) $(ALL_CFLAGS) $(LUSTRE_INC) -g -pg -o profiled/$*.o -c $<
 
 #
 # Flags for using Checker
@@ -64,7 +69,10 @@ COMPILE_ET=$(top_builddir)/lib/et/compile_et --build-tree
 OBJS= crc32.o dict.o unix.o e2fsck.o super.o pass1.o pass1b.o pass2.o \
 	pass3.o pass4.o pass5.o journal.o badblocks.o util.o dirinfo.o \
 	dx_dirinfo.o ehandler.o problem.o message.o recovery.o region.o \
-	revoke.o ea_refcount.o rehash.o profile.o prof_err.o $(MTRACE_OBJ)
+	revoke.o ea_refcount.o rehash.o profile.o prof_err.o pass6.o $(MTRACE_OBJ)
+@LFSCK_CMT@OBJS += lfsck_common.o
+
+@LFSCK_CMT@LFSCK_OBJS = lfsck_common.o lfsck.o
 
 PROFILED_OBJS= profiled/dict.o profiled/unix.o profiled/e2fsck.o \
 	profiled/super.o profiled/pass1.o profiled/pass1b.o \
@@ -74,7 +82,8 @@ PROFILED_OBJS= profiled/dict.o profiled/unix.o profiled/e2fsck.o \
 	profiled/message.o profiled/problem.o \
 	profiled/recovery.o profiled/region.o profiled/revoke.o \
 	profiled/ea_refcount.o profiled/rehash.o profiled/profile.o \
-	profiled/crc32.o profiled/prof_err.o
+	profiled/crc32.o profiled/prof_err.o profiled/pass6.o
+@LFSCK_CMT@PROFILED_OBJS += profiled/lfsck_common.o
 
 SRCS= $(srcdir)/e2fsck.c \
 	$(srcdir)/crc32.c \
@@ -87,6 +96,7 @@ SRCS= $(srcdir)/e2fsck.c \
 	$(srcdir)/pass3.c \
 	$(srcdir)/pass4.c \
 	$(srcdir)/pass5.c \
+	$(srcdir)/pass6.c \
 	$(srcdir)/journal.c \
 	$(srcdir)/recovery.c \
 	$(srcdir)/revoke.c \
@@ -105,7 +115,10 @@ SRCS= $(srcdir)/e2fsck.c \
 	prof_err.c \
 	$(MTRACE_SRC)
 
-all:: profiled $(PROGS) e2fsck $(MANPAGES) $(FMANPAGES)
+@LFSCK_CMT@SRCS += $(srcdir)/lfsck_common.c
+
+@LFSCK_CMT@LFSCK_SRCS = $(srcdir)/lfsck_common.c $(srcdir)/lfsck.c
+all:: profiled $(PROGS) $(USPROGS) e2fsck $(MANPAGES) $(FMANPAGES)
 
 @PROFILE_CMT@all:: e2fsck.profiled
 
@@ -138,7 +151,8 @@ crc32table.h: gen_crc32table
 tst_problem: $(srcdir)/problem.c $(srcdir)/problem.h $(LIBEXT2FS) \
 	$(DEPLIBCOM_ERR)
 	$(Q) $(CC) $(BUILD_LDFLAGS) $(ALL_CFLAGS) -o tst_problem \
-		$(srcdir)/problem.c -DUNITTEST $(LIBEXT2FS) $(LIBCOM_ERR)
+		$(srcdir)/problem.c -DUNITTEST $(LIBEXT2FS) $(LIBCOM_ERR) \
+		$(LIBINTL)
 
 tst_crc32: $(srcdir)/crc32.c $(LIBEXT2FS) $(DEPLIBCOM_ERR)
 	$(Q) $(CC) $(BUILD_LDFLAGS) $(ALL_CFLAGS) -o tst_crc32 $(srcdir)/crc32.c \
@@ -159,6 +173,10 @@ check:: tst_refcount tst_region tst_crc32 tst_problem
 	LD_LIBRARY_PATH=$(LIB) DYLD_LIBRARY_PATH=$(LIB) ./tst_region
 	LD_LIBRARY_PATH=$(LIB) DYLD_LIBRARY_PATH=$(LIB) ./tst_crc32
 	LD_LIBRARY_PATH=$(LIB) DYLD_LIBRARY_PATH=$(LIB) ./tst_problem
+
+@LFSCK_CMT@lfsck: $(LFSCK_OBJS)
+@LFSCK_CMT@	@echo "	LD $@"
+@LFSCK_CMT@	$(LD) -pthread $(ALL_LDFLAGS) $(LUSTRE_INC) $(LFSCK_OBJS) -o lfsck $(LUSTRE_LIB) -llustreapi $(DEPLIBS)
 
 extend: extend.o
 	$(E) "	LD $@"
@@ -183,6 +201,9 @@ profiled:
 @PROFILE_CMT@	$(E) "	MKDIR $@"
 @PROFILE_CMT@	$(Q) mkdir profiled
 
+lfsck.8: $(DEP_SUBSTITUTE) $(srcdir)/lfsck.8.in
+	$(SUBSTITUTE_UPTIME) $(srcdir)/lfsck.8.in lfsck.8
+
 e2fsck.8: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.8.in
 	$(E) "	SUBST $@"
 	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.8.in e2fsck.8
@@ -192,14 +213,18 @@ e2fsck.conf.5: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.conf.5.in
 	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.conf.5.in e2fsck.conf.5
 
 installdirs:
-	$(E) "	MKINSTALLDIRS $(root_sbindir) $(man8dir)"
+	$(E) "	MKINSTALLDIRS $(root_sbindir) $(sbindir) $(man8dir)"
 	$(Q) $(MKINSTALLDIRS) $(DESTDIR)$(root_sbindir) \
-		$(DESTDIR)$(man8dir) $(DESTDIR)$(man5dir)
+		$(DESTDIR)$(man8dir) $(DESTDIR)$(man5dir) $(DESTDIR)$(sbindir)
 
-install: $(PROGS) $(MANPAGES) $(FMANPAGES) installdirs
+install: $(PROGS)  $(USPROGS) $(MANPAGES) $(FMANPAGES) installdirs
 	$(Q) for i in $(PROGS); do \
 		echo "	INSTALL $(root_sbindir)/$$i"; \
 		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(root_sbindir)/$$i; \
+	done
+	@for i in $(USPROGS); do \
+		echo "  INSTALL $(sbindir)/$$i"; \
+		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(sbindir)/$$i; \
 	done
 	$(Q) for i in ext2 ext3 ext4 ext4dev; do \
 		echo "	LINK $(root_sbindir)/fsck.$$i"; \
@@ -236,6 +261,9 @@ uninstall:
 	for i in $(PROGS); do \
 		$(RM) -f $(DESTDIR)$(root_sbindir)/$$i; \
 	done
+	for i in $(USPROGS); do \
+		$(RM) -f $(DESTDIR)$(sbindir)/$$i; \
+	done
 	$(RM) -f $(DESTDIR)$(root_sbindir)/fsck.ext2 \
 		$(DESTDIR)$(root_sbindir)/fsck.ext3 \
 		$(DESTDIR)$(root_sbindir)/fsck.ext4 \
@@ -252,7 +280,7 @@ uninstall:
 			$(DESTDIR)$(root_sbindir)/fsck.ext4dev
 
 clean:
-	$(RM) -f $(PROGS) \#* *\# *.s *.o *.a *~ core e2fsck.static \
+	$(RM) -f $(PROGS) $(USPROGS) \#* *\# *.s *.o *.a *~ core e2fsck.static \
 		e2fsck.shared e2fsck.profiled flushb e2fsck.8 \
 		tst_problem tst_crc32 tst_region tst_refcount gen_crc32table \
 		crc32table.h e2fsck.conf.5 prof_err.c prof_err.h \
@@ -333,6 +361,12 @@ pass5.o: $(srcdir)/pass5.c $(srcdir)/e2fsck.h \
  $(top_builddir)/lib/ext2fs/ext2_err.h \
  $(top_srcdir)/lib/ext2fs/ext2_ext_attr.h $(top_srcdir)/lib/ext2fs/bitops.h \
  $(srcdir)/profile.h prof_err.h $(srcdir)/problem.h
+pass6.o: $(srcdir)/pass6.c $(srcdir)/e2fsck.h \
+ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \
+ $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext2_fs.h \
+ $(top_srcdir)/lib/et/com_err.h $(top_srcdir)/lib/ext2fs/ext2_io.h \
+ $(top_builddir)/lib/ext2fs/ext2_err.h $(top_srcdir)/lib/ext2fs/bitops.h \
+ $(srcdir)/problem.h $(srcdir)/lfsck.h
 journal.o: $(srcdir)/journal.c $(srcdir)/jfs_user.h $(srcdir)/e2fsck.h \
  $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \
  $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext3_extents.h \
@@ -435,6 +469,9 @@ region.o: $(srcdir)/region.c $(srcdir)/e2fsck.h \
  $(top_builddir)/lib/ext2fs/ext2_err.h \
  $(top_srcdir)/lib/ext2fs/ext2_ext_attr.h $(top_srcdir)/lib/ext2fs/bitops.h \
  $(srcdir)/profile.h prof_err.h
+lfsck.o: $(srcdir)/lfsck.c $(srcdir)/lfsck.h $(srcdir)/lfsck_common.c \
+ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \
+ $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext2_fs.h
 profile.o: $(srcdir)/profile.c $(top_srcdir)/lib/et/com_err.h \
  $(srcdir)/profile.h prof_err.h
 prof_err.o: prof_err.c

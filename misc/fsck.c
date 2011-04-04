@@ -1074,7 +1074,7 @@ static int check_all(NOARGS)
 
 static void usage(NOARGS)
 {
-	fputs(_("Usage: fsck [-AMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
+	fputs(_("Usage: fsck [-AmMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
 	exit(EXIT_USAGE);
 }
 
@@ -1196,6 +1196,7 @@ static void PRS(int argc, char *argv[])
 			case 'T':
 				notitle++;
 				break;
+			case 'm':
 			case 'M':
 				ignore_mounted++;
 				break;

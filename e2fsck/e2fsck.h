@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -156,6 +157,7 @@ struct resource_track {
 #define E2F_OPT_COMPRESS_DIRS	0x0400
 #define E2F_OPT_FRAGCHECK	0x0800
 #define E2F_OPT_JOURNAL_ONLY	0x1000 /* only replay the journal */
+#define E2F_OPT_VERBOSE		0x2000
 
 /*
  * E2fsck flags
@@ -178,8 +180,16 @@ struct resource_track {
 #define E2F_FLAG_GOT_DEVSIZE	0x0800 /* Device size has been fetched */
 #define E2F_FLAG_EXITING	0x1000 /* E2fsck exiting due to errors */
 #define E2F_FLAG_TIME_INSANE	0x2000 /* Time is insane */
+#define E2F_FLAG_EXPAND_EISIZE	0x4000 /* Expand the inodes (i_extra_isize) */
 
 #define E2F_RESET_FLAGS (E2F_FLAG_TIME_INSANE)
+
+/* Defines for Lustre */
+#define LUSTRE_NULL 0x0000
+#define LUSTRE_MDS  0x0001
+#define LUSTRE_OST  0x0002
+#define LUSTRE_TYPE 0x000f
+#define LUSTRE_ONLY 0x1000
 
 /*
  * Defines for indicating the e2fsck pass number
@@ -190,6 +200,29 @@ struct resource_track {
 #define E2F_PASS_4	4
 #define E2F_PASS_5	5
 #define E2F_PASS_1B	6
+
+typedef	enum {
+	E2F_SHARED_PRESERVE = 0,
+	E2F_SHARED_DELETE,
+	E2F_SHARED_LPF
+} shared_opt_t;
+
+typedef enum {
+	E2F_CLONE_DUP = 0,
+	E2F_CLONE_ZERO
+} clone_opt_t;
+
+#define EXT4_FITS_IN_INODE(ext4_inode, einode, field)	\
+	((offsetof(typeof(*ext4_inode), field) +	\
+	  sizeof(ext4_inode->field))			\
+	<= (EXT2_GOOD_OLD_INODE_SIZE +			\
+	    (einode)->i_extra_isize))			\
+
+#define BADNESS_NORMAL 		1
+#define BADNESS_HIGH		2
+#define BADNESS_THRESHOLD	8
+#define BADNESS_BAD_MODE	100
+#define BADNESS_LARGE_FILE 	2199023255552ULL
 
 /*
  * Define the extended attribute refcount structure
@@ -227,11 +260,11 @@ struct e2fsck_struct {
 			unsigned long max);
 
 	ext2fs_inode_bitmap inode_used_map; /* Inodes which are in use */
-	ext2fs_inode_bitmap inode_bad_map; /* Inodes which are bad somehow */
 	ext2fs_inode_bitmap inode_dir_map; /* Inodes which are directories */
 	ext2fs_inode_bitmap inode_bb_map; /* Inodes which are in bad blocks */
 	ext2fs_inode_bitmap inode_imagic_map; /* AFS inodes */
 	ext2fs_inode_bitmap inode_reg_map; /* Inodes which are regular files*/
+	ext2fs_inode_bitmap inode_ea_map; /* EA inodes which are non-orphan */
 
 	ext2fs_block_bitmap block_found_map; /* Blocks which are in use */
 	ext2fs_block_bitmap block_dup_map; /* Blks referenced more than once */
@@ -242,6 +275,8 @@ struct e2fsck_struct {
 	 */
 	ext2_icount_t	inode_count;
 	ext2_icount_t inode_link_info;
+	ext2_icount_t inode_badness;
+	int inode_badness_threshold;
 
 	ext2_refcount_t	refcount;
 	ext2_refcount_t refcount_extra;
@@ -302,6 +337,12 @@ struct e2fsck_struct {
 	io_channel	journal_io;
 	char	*journal_name;
 
+	/* lustre support */
+	int                      lustre_devtype;
+	char                    *lustre_mdsdb;
+	char                    *lustre_ostdb;
+	struct lfsck_outdb_info *lfsck_oinfo;
+
 #ifdef RESOURCE_TRACK
 	/*
 	 * For timing purposes
@@ -344,9 +385,21 @@ struct e2fsck_struct {
 	/* misc fields */
 	time_t now;
 	time_t time_fudge;	/* For working around buggy init scripts */
+	time_t now_tolerance;
 	int ext_attr_ver;
+	shared_opt_t shared;
+	clone_opt_t clone;
 	profile_t	profile;
 	int blocks_per_page;
+
+	/* Expand large inodes to atleast these many bytes */
+	int want_extra_isize;
+	/* minimum i_extra_isize found in used inodes. Should not be lesser
+	 * than s_min_extra_isize.
+	 */
+	__u32 min_extra_isize;
+	int fs_unexpanded_inodes;
+	ext2fs_inode_bitmap expand_eisize_map;
 
 	/*
 	 * For the use of callers of the e2fsck functions; not used by
@@ -374,6 +427,7 @@ extern void e2fsck_pass2(e2fsck_t ctx);
 extern void e2fsck_pass3(e2fsck_t ctx);
 extern void e2fsck_pass4(e2fsck_t ctx);
 extern void e2fsck_pass5(e2fsck_t ctx);
+extern void e2fsck_pass6(e2fsck_t ctx);
 
 /* e2fsck.c */
 extern errcode_t e2fsck_allocate_context(e2fsck_t *ret);
@@ -449,6 +503,11 @@ extern int e2fsck_pass1_check_symlink(ext2_filsys fs, ext2_ino_t ino,
 extern void e2fsck_clear_inode(e2fsck_t ctx, ext2_ino_t ino,
 			       struct ext2_inode *inode, int restart_flag,
 			       const char *source);
+#define e2fsck_mark_inode_bad(ctx,ino,count) \
+		e2fsck_mark_inode_bad_loc(ctx, ino, count, __func__, __LINE__)
+extern void e2fsck_mark_inode_bad_loc(e2fsck_t ctx, ino_t ino, int count,
+				      const char *func, const int line);
+extern int is_inode_bad(e2fsck_t ctx, ino_t ino);
 
 /* pass2.c */
 extern int e2fsck_process_bad_inode(e2fsck_t ctx, ext2_ino_t dir,
@@ -520,6 +579,8 @@ extern blk_t get_backup_sb(e2fsck_t ctx, ext2_filsys fs,
 			   const char *name, io_manager manager);
 extern int ext2_file_type(unsigned int mode);
 extern int write_all(int fd, char *buf, size_t count);
+void dump_mmp_msg(struct mmp_struct *mmp, const char *msg);
+errcode_t e2fsck_mmp_update(ext2_filsys fs);
 
 /* unix.c */
 extern void e2fsck_clear_progbar(e2fsck_t ctx);

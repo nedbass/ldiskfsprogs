@@ -34,11 +34,46 @@ EXCLUDE="--exclude .hg* --exclude .pc*"
 
 [ "`rpmbuild --version 2> /dev/null`" ] && RPM=rpmbuild || RPM=rpm
 
+# which distro and release
+DISTRO=$(lsb_release -is)
+RELEASE=$(lsb_release -rs)
+# now the hacks in case either is empty
+if [ -z "$DISTRO" ]; then
+    echo "You really ought to install the lsb_release binary for this distro"
+    if grep "SUSE Linux Enterprise Server " /etc/issue; then
+        DISTRO="SUSE LINUX"
+    fi
+fi
+if [ -z "$DISTRO" ]; then
+    echo "Could not determine the distribution.  Please install the lsb_release binary"
+    exit 1
+fi
+if [ -z "$RELEASE" ]; then
+    echo "You really ought to install the lsb_release binary for this distro"
+    case "$DISTRO" in
+        SUSE\ LINUX)
+            if grep "SUSE Linux Enterprise Server 11 " /etc/issue; then
+                RELEASE=11
+            elif grep "SUSE Linux Enterprise Server 10 " /etc/issue; then
+                RELEASE=10
+            fi
+        ;;
+    esac
+fi
+if [ -z "$RELEASE" ]; then
+    echo "Could not determine the release.  Please install the lsb_release binary"
+    exit 1
+fi
+
+SPECFILE="$currdir/e2fsprogs-${DISTRO// /_}-$RELEASE.spec"
+if [ ! -f "$SPECFILE" ]; then
+    SPECFILE="$currdir/e2fsprogs.spec"
+fi
 $RPM --define "_sourcedir $tmpdir" \
      --define "_topdir ${RPM_TOPDIR:-$(rpm -E %_topdir)}" \
      --define "_tmpdir ${RPM_TMPDIR:-$TMP}" \
      --define "extra_config_flags ${EXTRA_CONFIG_FLAGS:-''}" \
-     -ba $currdir/e2fsprogs.spec
+     -ba $SPECFILE
 
 rpm_exit=$?
 rm -rf $tmpdir

@@ -1296,7 +1296,8 @@ static int probe_hfsplus(struct blkid_probe *probe,
 		return 0;
 
 	label_len = blkid_be16(key->unicode_len) * 2;
-	unicode_16be_to_utf8(label, sizeof(label), key->unicode, label_len);
+	unicode_16be_to_utf8((unsigned char *)label, sizeof(label),
+			     key->unicode, label_len);
 	blkid_set_tag(probe->dev, "LABEL", label, 0);
 	return 0;
 }
@@ -1433,10 +1434,19 @@ static struct blkid_magic type_array[] = {
   { "iso9660",	32,	 1,  5, "CD001",		probe_iso9660 },
   { "iso9660",	32,	 9,  5, "CDROM",		probe_iso9660 },
   { "jfs",	32,	 0,  4, "JFS1",			probe_jfs },
-  { "zfs",       8,	 0,  8, "\0\0\x02\xf5\xb0\x07\xb1\x0c", probe_zfs },
-  { "zfs",       8,	 0,  8, "\x0c\xb1\x07\xb0\xf5\x02\0\0", probe_zfs },
-  { "zfs",     264,	 0,  8, "\0\0\x02\xf5\xb0\x07\xb1\x0c", probe_zfs },
-  { "zfs",     264,	 0,  8, "\x0c\xb1\x07\xb0\xf5\x02\0\0", probe_zfs },
+  /* ZFS has 128 root blocks (#4 is the first used), check only 6 of them */
+  { "zfs",     128,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     128,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
+  { "zfs",     132,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     132,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
+  { "zfs",     136,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     136,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
+  { "zfs",     384,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     384,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
+  { "zfs",     388,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     388,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
+  { "zfs",     392,	 0,  8, "\0\0\0\0\0\xba\xb1\x0c", probe_zfs },
+  { "zfs",     392,	 0,  8, "\x0c\xb1\xba\0\0\0\0\0", probe_zfs },
   { "hfsplus",	 1,	 0,  2, "BD",			probe_hfsplus },
   { "hfsplus",	 1,	 0,  2, "H+",			probe_hfsplus },
   { "hfsplus",	 1,	 0,  2, "HX",			probe_hfsplus },

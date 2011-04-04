@@ -148,7 +148,6 @@ errcode_t ext2fs_copy_dblist(ext2_dblist src, ext2_dblist *dest)
  * (moved to closefs.c)
  */
 
-
 /*
  * Add a directory block to the directory block list
  */
@@ -168,7 +167,7 @@ errcode_t ext2fs_add_dir_block(ext2_dblist dblist, ext2_ino_t ino, blk_t blk,
 					   sizeof(struct ext2_db_entry),
 					   &dblist->list);
 		if (retval) {
-			dblist->size -= 100;
+			dblist->size = old_size / sizeof(struct ext2_db_entry);
 			return retval;
 		}
 	}

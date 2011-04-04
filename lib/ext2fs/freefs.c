@@ -53,6 +53,11 @@ void ext2fs_free(ext2_filsys fs)
 	if (fs->icache)
 		ext2fs_free_inode_cache(fs->icache);
 
+	if (fs->mmp_buf)
+		ext2fs_free_mem(&fs->mmp_buf);
+	if (fs->mmp_unaligned_buf)
+		ext2fs_free_mem(&fs->mmp_unaligned_buf);
+
 	fs->magic = 0;
 
 	ext2fs_free_mem(&fs);

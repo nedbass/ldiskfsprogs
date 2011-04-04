@@ -606,6 +606,7 @@ static int fix_dotdot_proc(struct ext2_dir_entry *dirent,
 	struct fix_dotdot_struct *fp = (struct fix_dotdot_struct *) priv_data;
 	errcode_t	retval;
 	struct problem_context pctx;
+	__u16 dirdata = 0;
 
 	if ((dirent->name_len & 0xFF) != 2)
 		return 0;
@@ -625,12 +626,18 @@ static int fix_dotdot_proc(struct ext2_dir_entry *dirent,
 		fix_problem(fp->ctx, PR_3_ADJUST_INODE, &pctx);
 	}
 	dirent->inode = fp->parent;
+
+	dirdata  = dirent->name_len & (~EXT2_FT_MASK << 8);
+
 	if (fp->ctx->fs->super->s_feature_incompat &
 	    EXT2_FEATURE_INCOMPAT_FILETYPE)
 		dirent->name_len = (dirent->name_len & 0xFF) |
 			(EXT2_FT_DIR << 8);
 	else
 		dirent->name_len = dirent->name_len & 0xFF;
+
+	if (fp->ctx->fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA)
+		dirent->name_len |= dirdata;
 
 	fp->done++;
 	return DIRENT_ABORT | DIRENT_CHANGED;

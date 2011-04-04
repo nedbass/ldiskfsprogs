@@ -1,0 +1,104 @@
+#
+# Standard e2fsprogs prologue....
+#
+
+srcdir = @srcdir@
+top_srcdir = @top_srcdir@
+VPATH = @srcdir@
+top_builddir = ..
+my_dir = e2scan
+INSTALL = @INSTALL@
+SQLITE3_LIB = @SQLITE3_LIB@
+
+@MCONFIG@
+
+PROGS=		e2scan
+MANPAGES=	e2scan.8
+
+MK_CMDS=	_SS_DIR_OVERRIDE=../lib/ss ../lib/ss/mk_cmds
+
+E2SCAN_OBJS=e2scan.o db.o filelist.o
+
+SRCS=$(srcdir)/e2scan.c $(srcdir)/filelist.c $(srcdir)/db.c
+
+LIBS=$(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(LIBBLKID) \
+	$(LIBUUID) $(SQLITE3_LIB)
+DEPLIBS=$(LIBEXT2FS) $(LIBE2P) $(LIBSS) $(LIBCOM_ERR) $(DEPLIBBLKID) $(DEPLIBUUID)
+
+.c.o:
+	@echo "	CC $<"
+	@$(CC) -c $(ALL_CFLAGS) $< -o $@
+
+all:: $(PROGS) $(MANPAGES)
+
+e2scan: $(E2SCAN_OBJS) $(DEPLIBS)
+	@$(CC) $(ALL_LDFLAGS) -o e2scan $(E2SCAN_OBJS) $(LIBS)
+
+e2scan.8: $(DEP_SUBSTITUTE) $(srcdir)/e2scan.8.in
+	@echo "	SUBST $@"
+	@$(SUBSTITUTE_UPTIME) $(srcdir)/e2scan.8.in e2scan.8
+
+installdirs:
+	@echo "	MKINSTALLDIRS $(sbindir) $(man8dir)"
+	@$(MKINSTALLDIRS) $(DESTDIR)$(sbindir) \
+		$(DESTDIR)$(man8dir)
+
+install: $(PROGS) $(MANPAGES) installdirs
+	@for i in $(PROGS); do \
+		echo "	INSTALL $(sbindir)/$$i"; \
+		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(sbindir)/$$i; \
+	done
+	@for i in $(MANPAGES); do \
+		for j in $(COMPRESS_EXT); do \
+			$(RM) -f $(DESTDIR)$(man8dir)/$$i.$$j; \
+		done; \
+		echo "	INSTALL_DATA $(man8dir)/$$i"; \
+		$(INSTALL_DATA) $$i $(DESTDIR)$(man8dir)/$$i; \
+	done
+
+install-strip: install
+	@for i in $(PROGS); do \
+		echo "	STRIP $(sbindir)/$$i"; \
+		$(STRIP) $(DESTDIR)$(sbindir)/$$i; \
+	done
+
+uninstall:
+	for i in $(PROGS); do \
+		$(RM) -f $(DESTDIR)$(sbindir)/$$i; \
+	done
+	for i in $(MANPAGES); do \
+		$(RM) -f $(DESTDIR)$(man8dir)/$$i; \
+	done
+
+#check::
+#	./correct_test1 Makefile out
+#	./correct_test2
+
+clean:
+	$(RM) -f e2scan correct_test1 correct_test2 e2scan.8 \#* *.s *.o *.a *~ core out
+
+mostlyclean: clean
+distclean: clean
+	$(RM) -f debug_cmds.c .depend Makefile $(srcdir)/TAGS \
+		$(srcdir)/Makefile.in.old
+
+# +++ Dependency line eater +++
+#
+# Makefile dependencies follow.  This must be the last section in
+# the Makefile.in file
+#
+filelist.o: $(srcdir)/filelist.c $(top_srcdir)/lib/ext2fs/ext2_fs.h \
+ $(top_builddir)/lib/ext2fs/ext2_types.h $(top_srcdir)/lib/ext2fs/ext2fs.h \
+ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_srcdir)/lib/et/com_err.h \
+ $(top_srcdir)/lib/ext2fs/ext2_io.h $(top_builddir)/lib/ext2fs/ext2_err.h \
+ $(top_srcdir)/lib/ext2fs/bitops.h
+db.o: $(srcdir)/db.c $(top_srcdir)/lib/ext2fs/ext2_fs.h \
+ $(top_builddir)/lib/ext2fs/ext2_types.h $(top_srcdir)/lib/ext2fs/ext2fs.h \
+ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_srcdir)/lib/et/com_err.h \
+ $(top_srcdir)/lib/ext2fs/ext2_io.h $(top_builddir)/lib/ext2fs/ext2_err.h \
+ $(top_srcdir)/lib/ext2fs/bitops.h
+e2scan.o: $(srcdir)/e2scan.c \
+ $(top_srcdir)/lib/ext2fs/ext2_fs.h $(top_builddir)/lib/ext2fs/ext2_types.h \
+ $(top_srcdir)/lib/ext2fs/ext2fs.h $(top_srcdir)/lib/ext2fs/ext2_fs.h \
+ $(top_srcdir)/lib/et/com_err.h $(top_srcdir)/lib/ext2fs/ext2_io.h \
+ $(top_builddir)/lib/ext2fs/ext2_err.h $(top_srcdir)/lib/ext2fs/bitops.h

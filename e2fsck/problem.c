@@ -402,6 +402,29 @@ static struct e2fsck_problem problem_table[] = {
 	  N_("One or more @b @g descriptor checksums are invalid.  "),
 	     PROMPT_FIX, PR_PREEN_OK },
 
+	{ PR_0_MIN_EXTRA_ISIZE_INVALID,
+	  N_("@S has invalid s_min_extra_isize.  "),
+	  PROMPT_FIX, PR_PREEN_OK },
+
+	{ PR_0_WANT_EXTRA_ISIZE_INVALID,
+	  N_("@S has invalid s_want_extra_isize.  "),
+	  PROMPT_FIX, PR_PREEN_OK },
+
+	{ PR_0_CLEAR_EXTRA_ISIZE,
+	  N_("Disable extra_isize feature since @f has 128 byte inodes.\n"),
+	  PROMPT_NONE, 0 },
+
+	/* Superblock has invalid MMP block. */
+	{ PR_0_MMP_INVALID_BLK,
+	  N_("@S has invalid MMP block.  "),
+	  PROMPT_CLEAR, PR_PREEN_OK },
+
+	/* Superblock has invalid MMP magic. */
+	{ PR_0_MMP_INVALID_MAGIC,
+	  N_("@S has invalid MMP magic.  "),
+	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK},
+
+
 	/* Pass 1 errors */
 
 	/* Pass 1: Checking inodes, blocks, and sizes */
@@ -890,6 +913,79 @@ static struct e2fsck_problem problem_table[] = {
 	     "(size %Is, lblk %r)\n"),
 	  PROMPT_CLEAR, PR_PREEN_OK },
 
+	/* Bad extended attribute value in inode */
+	{ PR_1_INODE_EA_BAD_VALUE,
+	  N_("@a in @i %i is corrupt (@n value)."),
+	  PROMPT_CLEAR, 0},
+
+	/* extent has high 16 bits set */
+	{ PR_1_EXTENT_HI,
+	  N_("High 16 bits of extent/index @b set\n"),
+	  PROMPT_CLEAR, PR_LATCH_EXTENT_HI|PR_PREEN_OK|PR_NO_OK|PR_PREEN_NOMSG},
+
+	/* extent has high 16 bits set header */
+	{ PR_1_EXTENT_HI_LATCH,
+	  N_("@i %i has high 16 bits of extent/index @b set\n"),
+	  PROMPT_CLEAR, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
+
+	/* eh_depth should be 0 */
+	{ PR_1_EXTENT_EH_DEPTH_BAD,
+	  N_("@i %i has extent header with incorrect eh_depth\n"),
+	  PROMPT_FIX, 0 },
+
+	/* expand inode */
+	{ PR_1_EXPAND_EISIZE_WARNING,
+	  N_("\ne2fsck is being run with \"expand_extra_isize\" option or\n"
+	     "s_min_extra_isize of %d bytes has been set in the superblock.\n"
+	     "Inode %i does not have enough free space.  Either some EAs\n"
+	     "need to be deleted from this inode or the RO_COMPAT_EXTRA_ISIZE\n"
+	     "flag must be cleared.\n\n"), PROMPT_NONE, PR_PREEN_OK | PR_NO_OK |
+	     PR_PREEN_NOMSG },
+
+	/* expand inode */
+	{ PR_1_EXPAND_EISIZE,
+	  N_("Expanding @i %i.\n"),
+	  PROMPT_NONE, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
+
+	/* delete an EA so that EXTRA_ISIZE feature may be enabled */
+	{ PR_1_EISIZE_DELETE_EA,
+	  N_("Delete EA %s of @i %i so that EXTRA_ISIZE feature may be "
+	     "enabled?\n"), PROMPT_FIX, PR_NO_OK | PR_PREEN_NO },
+
+	/* an EA needs to be deleted by e2fsck is being run with -p or -y */
+	{ PR_1_EA_BLK_NOSPC,
+	  N_("An EA needs to be deleted for @i %i but e2fsck is being run\n"
+	     "with -p or -y mode.\n"),
+	  PROMPT_ABORT, 0 },
+
+	/* disable EXTRA_ISIZE feature since inode cannot be expanded */
+	{ PR_1_CLEAR_EXTRA_ISIZE,
+	  N_("Disable EXTRA_ISIZE feature since @i %i cannot be expanded\n"
+	     "without deletion of an EA.\n"),
+	  PROMPT_FIX, 0 },
+
+	/* Inode has illegal extended attribute value inode */
+	{ PR_1_ATTR_VALUE_EA_INODE,
+	  N_("@i %i has @I @a value @i %N.\n"),
+	  PROMPT_FIX, PR_PREEN_OK },
+
+	/* Invalid backpointer from extended attribute inode to parent inode */
+	{ PR_1_ATTR_INVAL_EA_INODE,
+	  N_("@n backpointer from @a @i %N to parent @i %i.\n"),
+	  PROMPT_CLEAR, PR_PREEN_OK },
+
+	/* Inode has invalid extended attribute. EA inode missing
+	 * EA_INODE flag. */
+	{ PR_1_ATTR_NO_EA_INODE_FL,
+	  N_("@i %i has @n @a. EA @i %N missing EA_INODE flag.\n"),
+	  PROMPT_CLEAR, PR_PREEN_OK },
+
+	/* EA inode for parent inode missing EA_INODE flag. */
+	{ PR_1_ATTR_SET_EA_INODE_FL,
+	  N_("EA @i %N for parent @i %i missing EA_INODE flag.\n"),
+	  PROMPT_FIX, PR_PREEN_OK },
+
+
 	/* Pass 1b errors */
 
 	/* Pass 1B: Rescan for duplicate/bad blocks */
@@ -982,6 +1078,14 @@ static struct e2fsck_problem problem_table[] = {
 	/* Couldn't clone file (error) */
 	{ PR_1D_CLONE_ERROR,
 	  N_("Couldn't clone file: %m\n"), PROMPT_NONE, 0 },
+
+	/* File with shared blocks found */
+	{ PR_1D_DISCONNECT_QUESTION,
+	  N_("File with shared blocks found\n"), PROMPT_CONNECT, 0 },
+
+	/* Couldn't unlink file (error) */
+	{ PR_1D_DISCONNECT_ERROR,
+	  N_("Couldn't unlink file: %m\n"), PROMPT_NONE, 0 },
 
 	/* Pass 2 errors */
 
@@ -1313,6 +1417,16 @@ static struct e2fsck_problem problem_table[] = {
 	  N_("i_file_acl_hi @F %N, @s zero.\n"),
 	  PROMPT_CLEAR, PR_PREEN_OK },
 
+	/* Inode too bad */
+	{ PR_2_INODE_TOOBAD,
+	  N_("@i %i is badly corrupt (badness value = %N).  "),
+	  PROMPT_CLEAR, PR_PREEN_OK },
+
+	/* Directory dirdata flag set */
+	{ PR_2_CLEAR_DIRDATA,
+	  N_("@E dirdata length set incorrectly.\n"),
+	  PROMPT_CLEAR, PR_PREEN_OK },
+
 	/* Pass 3 errors */
 
 	/* Pass 3: Checking directory connectivity */
@@ -1566,7 +1680,7 @@ static struct e2fsck_problem problem_table[] = {
 	/* Free inodes count wrong */
 	{ PR_5_FREE_INODE_COUNT,
 	  N_("Free @is count wrong (%i, counted=%j).\n"),
-	  PROMPT_FIX, PR_PREEN_OK | PR_PREEN_NOMSG },
+	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
 
 	/* Free blocks count for group wrong */
 	{ PR_5_FREE_BLOCK_COUNT_GROUP,
@@ -1576,7 +1690,7 @@ static struct e2fsck_problem problem_table[] = {
 	/* Free blocks count wrong */
 	{ PR_5_FREE_BLOCK_COUNT,
 	  N_("Free @bs count wrong (%b, counted=%c).\n"),
-	  PROMPT_FIX, PR_PREEN_OK | PR_PREEN_NOMSG },
+	  PROMPT_FIX, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
 
 	/* Programming error: bitmap endpoints don't match */
 	{ PR_5_BMAP_ENDPOINTS,
@@ -1629,6 +1743,11 @@ static struct e2fsck_problem problem_table[] = {
 	  N_("@g %g @i(s) in use but @g is marked INODE_UNINIT\n"),
 	  PROMPT_FIX, PR_PREEN_OK },
 
+	/* Expand inode */
+	{ PR_5_EXPAND_EISIZE,
+	  N_("Expanding @i %i.\n"),
+	  PROMPT_NONE, PR_PREEN_OK | PR_NO_OK | PR_PREEN_NOMSG },
+
 	/* Post-Pass 5 errors */
 
 	/* Recreate journal if E2F_FLAG_JOURNAL_INODE flag is set */
@@ -1656,6 +1775,7 @@ static struct latch_descr pr_latch_info[] = {
 	{ PR_LATCH_TOOBIG, PR_1_INODE_TOOBIG, 0 },
 	{ PR_LATCH_OPTIMIZE_DIR, PR_3A_OPTIMIZE_DIR_HEADER, PR_3A_OPTIMIZE_DIR_END },
 	{ PR_LATCH_BG_CHECKSUM, PR_0_GDT_CSUM_LATCH, 0 },
+	{ PR_LATCH_EXTENT_HI, PR_1_EXTENT_HI_LATCH, 0 },
 	{ -1, 0, 0 },
 };
 

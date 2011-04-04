@@ -222,6 +222,22 @@ corruption in the file system.)
 Expand the directory
 .IR filespec .
 .TP
+.I ext_map [-h] [-t] [-i <filespec>] [-b block]
+Dump the extent map contained in inode/block.
+.IR -h
+option can be used to display only the extent headers.
+.IR -t
+option can be used to dump entire extent tree, in case inode
+is specified, or branch if block is specified.
+If
+.IR -i
+option is set, dump the extent map contained in the inode
+.IR filespec .
+If
+.IR -b
+option is set, dump the extent map contained in block
+.IR block .
+.TP
 .I feature [fs_feature] [-fs_feature] ...
 Set or clear various filesystem features in the superblock.  After setting
 or clearing any filesystem features that were requested, print the current

@@ -19,6 +19,39 @@
 #include "ext2_fs.h"
 #include "ext2fs.h"
 
+/*
+ * Compute the total directory entry data length.
+ * This includes the filename and an implicit NUL terminator (always present),
+ * and optional extensions.  Each extension has a bit set in the high 4 bits of
+ * de->file_type, and the extension length is the first byte in each entry.
+ */
+int ext2_get_dirent_size(struct ext2_dir_entry_2 *de)
+{
+	return ext2_get_dirent_dirdata_size(de, ~EXT2_FT_MASK);
+}
+
+int ext2_get_dirent_dirdata_size(struct ext2_dir_entry_2 *de, char dirdata_flags)
+{
+	char *len = de->name + de->name_len + 1 /* NUL terminator */;
+	int dlen = 0;
+	__u8 extra_data_flags = (de->file_type & ~EXT2_FT_MASK) >> 4;
+
+	dirdata_flags >>= 4;
+	while ((extra_data_flags & dirdata_flags) != 0) {
+		if (extra_data_flags & 1) {
+			if (dirdata_flags & 1)
+				dlen += *len;
+
+			len += *len;
+		}
+		extra_data_flags >>= 1;
+		dirdata_flags >>= 1;
+	}
+
+	/* add NUL terminator byte to dirdata length */
+	return dlen + (dlen != 0);
+}
+
 errcode_t ext2fs_read_dir_block2(ext2_filsys fs, blk_t block,
 				 void *buf, int flags EXT2FS_ATTR((unused)))
 {

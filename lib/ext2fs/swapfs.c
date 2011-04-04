@@ -70,6 +70,8 @@ void ext2fs_swap_super(struct ext2_super_block * sb)
 	sb->s_min_extra_isize = ext2fs_swab16(sb->s_min_extra_isize);
 	sb->s_want_extra_isize = ext2fs_swab16(sb->s_want_extra_isize);
 	sb->s_flags = ext2fs_swab32(sb->s_flags);
+	sb->s_mmp_update_interval = ext2fs_swab16(sb->s_mmp_update_interval);
+	sb->s_mmp_block = ext2fs_swab64(sb->s_mmp_block);
 	sb->s_kbytes_written = ext2fs_swab64(sb->s_kbytes_written);
 	sb->s_snapshot_inum = ext2fs_swab32(sb->s_snapshot_inum);
 	sb->s_snapshot_id = ext2fs_swab32(sb->s_snapshot_id);
@@ -81,16 +83,16 @@ void ext2fs_swap_super(struct ext2_super_block * sb)
 		sb->s_hash_seed[i] = ext2fs_swab32(sb->s_hash_seed[i]);
 
 	/* if journal backup is for a valid extent-based journal... */
-	if (!ext2fs_extent_header_verify(sb->s_jnl_blocks,
-					 sizeof(sb->s_jnl_blocks))) {
-		/* ... swap only the journal i_size */
-		sb->s_jnl_blocks[16] = ext2fs_swab32(sb->s_jnl_blocks[16]);
-		/* and the extent data is not swapped on read */
-		return;
+	if (ext2fs_extent_header_verify(sb->s_jnl_blocks,
+					sizeof(sb->s_jnl_blocks)) == 0) {
+		/* ... swap only the journal i_size and i_size_high,
+		 * and the extent data is not swapped on read */
+		i = 15;
+	} else {
+		/* direct/indirect journal: swap it all */
+		i = 0;
 	}
-
-	/* direct/indirect journal: swap it all */
-	for (i=0; i < 17; i++)
+	for (; i < 17; i++)
 		sb->s_jnl_blocks[i] = ext2fs_swab32(sb->s_jnl_blocks[i]);
 }
 
@@ -125,7 +127,7 @@ void ext2fs_swap_ext_attr_entry(struct ext2_ext_attr_entry *to_entry,
 				struct ext2_ext_attr_entry *from_entry)
 {
 	to_entry->e_value_offs  = ext2fs_swab16(from_entry->e_value_offs);
-	to_entry->e_value_block = ext2fs_swab32(from_entry->e_value_block);
+	to_entry->e_value_inum  = ext2fs_swab32(from_entry->e_value_inum);
 	to_entry->e_value_size  = ext2fs_swab32(from_entry->e_value_size);
 	to_entry->e_hash	= ext2fs_swab32(from_entry->e_hash);
 }
@@ -242,11 +244,13 @@ void ext2fs_swap_inode_full(ext2_filsys fs, struct ext2_inode_large *t,
 	if (bufsize < (int) (sizeof(struct ext2_inode) + sizeof(__u16)))
 		return; /* no i_extra_isize field */
 
-	if (hostorder)
+	if (hostorder) {
 		extra_isize = f->i_extra_isize;
-	t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
-	if (!hostorder)
+		t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
+	} else {
+		t->i_extra_isize = ext2fs_swab16(f->i_extra_isize);
 		extra_isize = t->i_extra_isize;
+	}
 	if (extra_isize > EXT2_INODE_SIZE(fs->super) -
 				sizeof(struct ext2_inode)) {
 		/* this is error case: i_extra_size is too large */
@@ -284,6 +288,14 @@ void ext2fs_swap_inode(ext2_filsys fs, struct ext2_inode *t,
 	ext2fs_swap_inode_full(fs, (struct ext2_inode_large *) t,
 				(struct ext2_inode_large *) f, hostorder,
 				sizeof(struct ext2_inode));
+}
+
+void ext2fs_swap_mmp(struct mmp_struct *mmp)
+{
+	mmp->mmp_magic = ext2fs_swab32(mmp->mmp_magic);
+	mmp->mmp_seq = ext2fs_swab32(mmp->mmp_seq);
+	mmp->mmp_time = ext2fs_swab64(mmp->mmp_time);
+	mmp->mmp_check_interval = ext2fs_swab16(mmp->mmp_check_interval);
 }
 
 #endif

@@ -6,13 +6,27 @@
 Summary: Utilities for managing ext2/ext3/ext4 filesystems
 Name: e2fsprogs
 Version: @E2FSPROGS_PKGVER@
-Release: 0
+Release: 0%{_vendor}
 License: GPLv2
 Group: System Environment/Base
 Source:  ftp://download.sourceforge.net/pub/sourceforge/e2fsprogs/e2fsprogs-%{version}.tar.gz
-Url: http://e2fsprogs.sourceforge.net/
+Url: http://downloads.lustre.org/public/tools/e2fsprogs/
 Prereq: /sbin/ldconfig
 BuildRoot: %{_tmppath}/%{name}-root
+BuildRequires: autoconf texinfo
+%if %{_vendor} == "suse"
+Group: System/Filesystems
+@LFSCK_CMT@BuildRequires: db-devel >= 4.1
+@LFSCK_CMT@Requires: db >= @DB4VERSION@
+Provides: e2fsbn ext2fs libcom_err = %{version} ldiskfsprogs = %{version}
+Obsoletes: ext2fs libcom_err < %{version}
+%else
+Group: System Environment/Base
+@LFSCK_CMT@BuildRequires: db4-devel >= 4.1
+@LFSCK_CMT@Requires: db4 >= @DB4VERSION@
+Provides: e2fsprogs-libs = %{version} ldiskfsprogs = %{version}
+Obsoletes: e4fsprogs e2fsprogs-libs < %{version}
+%endif
 
 %description
 The e2fsprogs package contains a number of utilities for creating,
@@ -62,8 +76,8 @@ SMP systems.
 %setup
 
 %build
-%configure --enable-elf-shlibs --enable-nls \
-	%{?extra_config_flags:%extra_config_flags}
+%configure --enable-elf-shlibs --enable-nls --enable-maintainer-mode \
+	%{?extra_config_flags:%extra_config_flags} @LFSCK_CMT@ --enable-lfsck
 make
 make check
 
@@ -135,6 +149,8 @@ exit 0
 %{_sbindir}/filefrag
 %{_sbindir}/mklost+found
 %{_sbindir}/e2freefrag
+@LFSCK_CMT@%{_sbindir}/lfsck
+@E2SCAN_CMT@%{_sbindir}/e2scan
 
 %{_root_libdir}/libblkid.so.*
 %{_root_libdir}/libcom_err.so.*
@@ -160,6 +176,7 @@ exit 0
 %{_mandir}/man8/debugfs.8*
 %{_mandir}/man8/dumpe2fs.8*
 %{_mandir}/man8/e2fsck.8*
+@LFSCK_CMT@%{_mandir}/man8/lfsck.8*
 %{_mandir}/man8/findfs.8*
 %{_mandir}/man8/fsck.ext2.8*
 %{_mandir}/man8/fsck.ext3.8*
@@ -167,6 +184,7 @@ exit 0
 %{_mandir}/man8/fsck.ext4dev.8*
 %{_mandir}/man8/e2image.8*
 %{_mandir}/man8/e2label.8*
+@E2SCAN_CMT@%{_mandir}/man8/e2scan.8*
 %{_mandir}/man8/e2undo.8*
 %{_mandir}/man8/fsck.8*
 %{_mandir}/man8/logsave.8*

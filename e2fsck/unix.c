@@ -10,6 +10,7 @@
  */
 
 #define _XOPEN_SOURCE 600 /* for inclusion of sa_handler in Solaris */
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #ifdef HAVE_STDLIB_H
@@ -47,6 +48,9 @@ extern int optind;
 #ifdef HAVE_DIRENT_H
 #include <dirent.h>
 #endif
+#ifdef HAVE_LIMITS_H
+#include <limits.h>
+#endif
 
 #include "e2p/e2p.h"
 #include "et/com_err.h"
@@ -54,6 +58,17 @@ extern int optind;
 #include "e2fsck.h"
 #include "problem.h"
 #include "../version.h"
+
+#include "lfsck.h"
+
+static struct option long_options[] = {
+#ifdef ENABLE_LFSCK
+	{ "mdsdb", 1, NULL, 1 },
+	{ "mdtdb", 1, NULL, 1 },
+	{ "ostdb", 1, NULL, 2 },
+#endif
+	{ 0, 0, 0, 0 }
+};
 
 /* Command line options */
 static int cflag;		/* check disk */
@@ -342,6 +357,15 @@ static void check_if_skip(e2fsck_t ctx)
 			     fs->super->s_checkinterval*2))
 			reason = 0;
 	}
+#ifdef ENABLE_LFSCK
+	if (ctx->lustre_devtype & LUSTRE_TYPE) {
+		if (!reason || ctx->options & E2F_OPT_READONLY)
+			ctx->lustre_devtype |= LUSTRE_ONLY;
+		if (!reason)
+			reason = _(" lustre database creation");
+	}
+#endif
+
 	if (reason) {
 		fputs(ctx->device_name, stdout);
 		printf(reason, reason_arg);
@@ -376,6 +400,13 @@ static void check_if_skip(e2fsck_t ctx)
 skip:
 	ext2fs_close(fs);
 	ctx->fs = NULL;
+	if (ctx->lustre_mdsdb)
+		free(ctx->lustre_mdsdb);
+	if (ctx->lustre_ostdb)
+		free(ctx->lustre_ostdb);
+	if (ctx->lfsck_oinfo)
+		e2fsck_lfsck_cleanupdb(ctx);
+
 	e2fsck_free_context(ctx);
 	exit(FSCK_OK);
 }
@@ -560,6 +591,49 @@ static void signal_cancel(int sig EXT2FS_ATTR((unused)))
 }
 #endif
 
+static void initialize_profile_options(e2fsck_t ctx)
+{
+	char *tmp;
+
+	/* [options] shared=preserve|lost+found|delete */
+	tmp = NULL;
+	ctx->shared = E2F_SHARED_PRESERVE;
+	profile_get_string(ctx->profile, "options", "shared", 0,
+		           "preserve", &tmp);
+	if (tmp) {
+		if (strcmp(tmp, "preserve") == 0)
+			ctx->shared = E2F_SHARED_PRESERVE;
+		else if (strcmp(tmp, "delete") == 0)
+			ctx->shared = E2F_SHARED_DELETE;
+		else if (strcmp(tmp, "lost+found") == 0)
+			ctx->shared = E2F_SHARED_LPF;
+		else {
+			com_err(ctx->program_name, 0,
+				_("configuration error: 'shared=%s'"), tmp);
+			fatal_error(ctx, 0);
+		}
+		free(tmp);
+	}
+
+	/* [options] clone=dup|zero */
+	tmp = NULL;
+	ctx->clone = E2F_CLONE_DUP;
+	profile_get_string(ctx->profile, "options", "clone", 0,
+			   "dup", &tmp);
+	if (tmp) {
+		if (strcmp(tmp, "dup") == 0)
+			ctx->clone = E2F_CLONE_DUP;
+		else if (strcmp(tmp, "zero") == 0)
+			ctx->clone = E2F_CLONE_ZERO;
+		else {
+			com_err(ctx->program_name, 0,
+				_("configuration error: 'clone=%s'"), tmp);
+			fatal_error(ctx, 0);
+		}
+		free(tmp);
+	}
+}
+
 static void parse_extended_opts(e2fsck_t ctx, const char *opts)
 {
 	char	*buf, *token, *next, *p, *arg;
@@ -585,17 +659,64 @@ static void parse_extended_opts(e2fsck_t ctx, const char *opts)
 				continue;
 			}
 			ea_ver = strtoul(arg, &p, 0);
-			if (*p ||
-			    ((ea_ver != 1) && (ea_ver != 2))) {
-				fprintf(stderr,
-					_("Invalid EA version.\n"));
+			if (*p == '\0' && (ea_ver == 1 || ea_ver == 2)) {
+				ctx->ext_attr_ver = ea_ver;
+			} else {
+				fprintf(stderr, _("Invalid EA version.\n"));
 				extended_usage++;
 				continue;
 			}
-			ctx->ext_attr_ver = ea_ver;
 		} else if (strcmp(token, "fragcheck") == 0) {
 			ctx->options |= E2F_OPT_FRAGCHECK;
 			continue;
+		/* -E shared=preserve|lost+found|delete */
+		} else if (strcmp(token, "shared") == 0) {
+			if (!arg) {
+				extended_usage++;
+				continue;
+			}
+			if (strcmp(arg, "preserve") == 0) {
+				ctx->shared = E2F_SHARED_PRESERVE;
+			} else if (strcmp(arg, "lost+found") == 0) {
+				ctx->shared = E2F_SHARED_LPF;
+			} else if (strcmp(arg, "delete") == 0) {
+				ctx->shared = E2F_SHARED_DELETE;
+			} else {
+				extended_usage++;
+				continue;
+			}
+		/* -E clone=dup|zero */
+		} else if (strcmp(token, "clone") == 0) {
+			if (!arg) {
+				extended_usage++;
+				continue;
+			}
+			if (strcmp(arg, "dup") == 0) {
+				ctx->clone = E2F_CLONE_DUP;
+			} else if (strcmp(arg, "zero") == 0) {
+				ctx->clone = E2F_CLONE_ZERO;
+			} else {
+				extended_usage++;
+				continue;
+			}
+		} else if (strcmp(token, "expand_extra_isize") == 0) {
+			ctx->flags |= E2F_FLAG_EXPAND_EISIZE;
+			if (arg) {
+				extended_usage++;
+				continue;
+			}
+		/* -E inode_badness_threshold=<value> */
+		} else if (strcmp(token, "inode_badness_threshold") == 0) {
+			if (!arg) {
+				extended_usage++;
+				continue;
+			}
+			ctx->inode_badness_threshold = strtoul(arg, &p, 0);
+			if (*p != '\0' || (ctx->inode_badness_threshold > 200)){
+				fprintf(stderr, _("Invalid badness value.\n"));
+				extended_usage++;
+				continue;
+			}
 		} else if (strcmp(token, "journal_only") == 0) {
 			if (arg) {
 				extended_usage++;
@@ -618,9 +739,38 @@ static void parse_extended_opts(e2fsck_t ctx, const char *opts)
 		fputs(("\tea_ver=<ea_version (1 or 2)>\n"), stderr);
 		fputs(("\tfragcheck\n"), stderr);
 		fputs(("\tjournal_only\n"), stderr);
+		fputs(("\tshared=<preserve|lost+found|delete>\n"), stderr);
+		fputs(("\tclone=<dup|zero>\n"), stderr);
+		fputs(("\texpand_extra_isize\n"), stderr);
+		fputs(("\tinode_badness_threhold=(value)\n"), stderr);
 		fputc('\n', stderr);
 		exit(1);
 	}
+}
+
+static char *my_dirname(char *path)
+{
+
+	if (path != NULL) {
+		char *tmp = strrchr(path, '/');
+		if (tmp != NULL) {
+			*tmp = '\0';
+			return path;
+		}
+	}
+
+	return ".";
+}
+
+static const char *my_basename(const char *path)
+{
+	if (path != NULL) {
+		char *tmp = strrchr(path, '/');
+		if (tmp != NULL)
+			return tmp + 1;
+	}
+
+	return path;
 }
 
 static void syntax_err_report(const char *filename, long err, int line_num)
@@ -637,6 +787,7 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 {
 	int		flush = 0;
 	int		c, fd;
+	int             option_index;
 #ifdef MTRACE
 	extern void	*mallwatch;
 #endif
@@ -645,7 +796,6 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 #ifdef HAVE_SIGNAL_H
 	struct sigaction	sa;
 #endif
-	char		*extended_opts = 0;
 	char		*cp;
 	int 		res;		/* result of sscanf */
 #ifdef CONFIG_JBD_DEBUG
@@ -676,8 +826,83 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 		ctx->program_name = *argv;
 	else
 		ctx->program_name = "e2fsck";
-	while ((c = getopt (argc, argv, "panyrcC:B:dE:fvtFVM:b:I:j:P:l:L:N:SsDk")) != EOF)
+
+	if ((cp = getenv("E2FSCK_CONFIG")) != NULL)
+		config_fn[0] = cp;
+	profile_set_syntax_err_cb(syntax_err_report);
+	profile_init(config_fn, &ctx->profile);
+	initialize_profile_options(ctx);
+
+	ctx->inode_badness_threshold = BADNESS_THRESHOLD;
+	ctx->now_tolerance = 172800; /* Two days */
+
+	ctx->lustre_devtype = LUSTRE_NULL;
+
+	while ((c = getopt_long(argc, argv,
+				"panyrcC:B:dE:fvtFVM:b:I:j:P:l:L:N:SsDk",
+				long_options, &option_index)) != EOF)
 		switch (c) {
+		case 1: {
+			char *dbpath, *tmp;
+
+			if (!optarg)
+	                        usage(ctx);
+
+			dbpath = malloc(PATH_MAX);
+			if (dbpath == NULL) {
+				fprintf(stderr, "Out of memory\n");
+				exit(1);
+			}
+			tmp = malloc(PATH_MAX);
+			if (tmp == NULL) {
+				fprintf(stderr, "Out of memory\n");
+				exit(1);
+			}
+
+			strcpy(tmp, optarg);
+			if (realpath(my_dirname(tmp), dbpath) == NULL) {
+				fprintf(stderr, "Failure to resolve path %s\n",
+					optarg);
+				exit(1);
+			}
+
+			strcpy(tmp, optarg);
+			sprintf(dbpath+strlen(dbpath), "/%s", my_basename(tmp));
+			ctx->lustre_mdsdb = dbpath;
+			ctx->lustre_devtype |= LUSTRE_MDS;
+
+			free(tmp);
+			break;
+		}
+		case 2: {
+			char *dbpath, *tmp;
+
+			dbpath = malloc(PATH_MAX);
+			if (dbpath == NULL) {
+				fprintf(stderr, "Out of memory\n");
+				exit(1);
+			}
+			tmp = malloc(PATH_MAX);
+			if (tmp == NULL) {
+				fprintf(stderr, "Out of memory\n");
+				exit(1);
+			}
+
+			strcpy(tmp, optarg);
+			if (realpath(my_dirname(tmp), dbpath) == NULL) {
+				fprintf(stderr, "Failure to resolve path %s\n",
+					optarg);
+				exit(1);
+			}
+
+			strcpy(tmp, optarg);
+			sprintf(dbpath+strlen(dbpath), "/%s", my_basename(tmp));
+			ctx->lustre_ostdb = dbpath;
+			ctx->lustre_devtype |= LUSTRE_OST;
+
+			free(tmp);
+			break;
+		}
 		case 'C':
 			ctx->progress = e2fsck_update_progress;
 			res = sscanf(optarg, "%d", &ctx->progress_fd);
@@ -706,7 +931,7 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 			ctx->options |= E2F_OPT_COMPRESS_DIRS;
 			break;
 		case 'E':
-			extended_opts = optarg;
+			parse_extended_opts(ctx, optarg);
 			break;
 		case 'p':
 		case 'a':
@@ -791,6 +1016,7 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 			break;
 		case 'v':
 			verbose = 1;
+			ctx->options |= E2F_OPT_VERBOSE;
 			break;
 		case 'V':
 			show_version_only = 1;
@@ -809,6 +1035,14 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 		default:
 			usage(ctx);
 		}
+	if (ctx->lustre_devtype) {
+		if ((ctx->lustre_devtype != LUSTRE_MDS) &&
+		    ctx->lustre_devtype != (LUSTRE_MDS | LUSTRE_OST)) {
+			com_err(ctx->program_name, 0,
+				_("must specify --mdsdb with --ostdb"));
+			usage(ctx);
+		}
+	}
 	if (show_version_only)
 		return 0;
 	if (optind != argc - 1)
@@ -841,13 +1075,6 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 			argv[optind]);
 		fatal_error(ctx, 0);
 	}
-	if (extended_opts)
-		parse_extended_opts(ctx, extended_opts);
-
-	if ((cp = getenv("E2FSCK_CONFIG")) != NULL)
-		config_fn[0] = cp;
-	profile_set_syntax_err_cb(syntax_err_report);
-	profile_init(config_fn, &ctx->profile);
 
 	if (flush) {
 		fd = open(ctx->filesystem_name, O_RDONLY, 0);
@@ -963,6 +1190,70 @@ static errcode_t try_open_fs(e2fsck_t ctx, int flags, io_manager io_ptr,
 static const char *my_ver_string = E2FSPROGS_VERSION;
 static const char *my_ver_date = E2FSPROGS_DATE;
 
+int e2fsck_check_mmp(ext2_filsys fs, e2fsck_t ctx)
+{
+	struct mmp_struct *mmp_s;
+	unsigned int mmp_check_interval;
+	errcode_t retval = 0;
+	struct problem_context pctx;
+	unsigned int wait_time = 0;
+
+	clear_problem_context(&pctx);
+	if (fs->mmp_buf == NULL) {
+		retval = ext2fs_get_mem(fs->blocksize, &fs->mmp_buf);
+		if (retval)
+			goto check_error;
+	}
+
+	retval = ext2fs_mmp_read(fs, fs->super->s_mmp_block, fs->mmp_buf);
+	if (retval)
+		goto check_error;
+
+	mmp_s = fs->mmp_buf;
+
+	mmp_check_interval = fs->super->s_mmp_update_interval;
+	if (mmp_check_interval < EXT2_MMP_MIN_CHECK_INTERVAL)
+		mmp_check_interval = EXT2_MMP_MIN_CHECK_INTERVAL;
+
+	/*
+ 	 * If check_interval in MMP block is larger, use that instead of
+	 * check_interval from the superblock.
+	 */
+	if (mmp_s->mmp_check_interval > mmp_check_interval)
+		mmp_check_interval = mmp_s->mmp_check_interval;
+
+	wait_time = mmp_check_interval * 2 + 1;
+
+	/* Print warning if e2fck will wait for more than 20 secs. */
+	if (wait_time > EXT2_MMP_MIN_CHECK_INTERVAL * 4) {
+		printf("MMP interval is %u seconds and total wait time is %u "
+		       "seconds. Please wait...\n",
+			mmp_check_interval, wait_time * 2);
+	}
+
+	return 0;
+
+check_error:
+
+	if (retval == EXT2_ET_MMP_BAD_BLOCK) {
+		if (fix_problem(ctx, PR_0_MMP_INVALID_BLK, &pctx)) {
+			fs->super->s_mmp_block = 0;
+			ext2fs_mark_super_dirty(fs);
+		}
+	} else if (retval == EXT2_ET_MMP_FAILED) {
+		dump_mmp_msg(fs->mmp_buf, NULL);
+	} else if (retval == EXT2_ET_MMP_FSCK_ON) {
+		dump_mmp_msg(fs->mmp_buf,
+			     _("If you are sure that e2fsck "
+			       "is not running on any node then use "
+			       "'tune2fs -f -E clear_mmp {device}'\n"));
+	} else if (retval == EXT2_ET_MMP_MAGIC_INVALID) {
+		if (fix_problem(ctx, PR_0_MMP_INVALID_MAGIC, &pctx))
+			ext2fs_mmp_clear(fs);
+	}
+	return 1;
+}
+
 int main (int argc, char *argv[])
 {
 	errcode_t	retval = 0, retval2 = 0, orig_retval = 0;
@@ -1031,6 +1322,8 @@ int main (int argc, char *argv[])
 				    _("need terminal for interactive repairs"));
 	}
 	ctx->superblock = ctx->use_superblock;
+
+	flags = EXT2_FLAG_SKIP_MMP;
 restart:
 #ifdef CONFIG_TESTIO_DEBUG
 	if (getenv("TEST_IO_FLAGS") || getenv("TEST_IO_BLOCK")) {
@@ -1039,11 +1332,12 @@ restart:
 	} else
 #endif
 		io_ptr = unix_io_manager;
-	flags = EXT2_FLAG_NOFREE_ON_ERROR;
+	flags |= EXT2_FLAG_NOFREE_ON_ERROR;
 	if ((ctx->options & E2F_OPT_READONLY) == 0)
-		flags |= EXT2_FLAG_RW;
-	if ((ctx->mount_flags & EXT2_MF_MOUNTED) == 0)
-		flags |= EXT2_FLAG_EXCLUSIVE;
+		flags |= EXT2_FLAG_RW | EXT2_FLAG_EXCLUSIVE;
+	/* we would abort above in check_mount() unless user asks for this */
+	if ((ctx->mount_flags & EXT2_MF_MOUNTED) != 0)
+		flags &= ~EXT2_FLAG_EXCLUSIVE;
 
 	retval = try_open_fs(ctx, flags, io_ptr, &fs);
 
@@ -1208,6 +1502,21 @@ failure:
 
 	ehandler_init(fs->io);
 
+	if ((fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) &&
+	    (flags & EXT2_FLAG_SKIP_MMP)) {
+		if (e2fsck_check_mmp(fs, ctx))
+			fatal_error(ctx, 0);
+	}
+
+	 /*
+	  * Restart in order to reopen fs but this time start mmp.
+	  */
+	if (flags & EXT2_FLAG_SKIP_MMP) {
+		ext2fs_close(fs);
+		flags &=~EXT2_FLAG_SKIP_MMP;
+		goto restart;
+	}
+
 	if ((ctx->mount_flags & EXT2_MF_MOUNTED) &&
 	    !(sb->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER))
 		goto skip_journal;
@@ -1331,6 +1640,54 @@ print_unsupp_features:
 	if (ctx->flags & E2F_FLAG_SIGNAL_MASK)
 		fatal_error(ctx, 0);
 	check_if_skip(ctx);
+
+	if (EXT2_GOOD_OLD_INODE_SIZE + sb->s_want_extra_isize >
+							EXT2_INODE_SIZE(sb)) {
+		if (fix_problem(ctx, PR_0_WANT_EXTRA_ISIZE_INVALID, &pctx))
+			sb->s_want_extra_isize = sizeof(struct ext2_inode_large) -
+						       EXT2_GOOD_OLD_INODE_SIZE;
+	}
+	if (EXT2_GOOD_OLD_INODE_SIZE + sb->s_min_extra_isize >
+							EXT2_INODE_SIZE(sb)) {
+		if (fix_problem(ctx, PR_0_MIN_EXTRA_ISIZE_INVALID, &pctx))
+			sb->s_min_extra_isize = 0;
+	}
+	if (EXT2_INODE_SIZE(sb) > EXT2_GOOD_OLD_INODE_SIZE) {
+		ctx->want_extra_isize = sizeof(struct ext2_inode_large) -
+						     EXT2_GOOD_OLD_INODE_SIZE;
+		ctx->min_extra_isize = ~0L;
+		if (EXT2_HAS_RO_COMPAT_FEATURE(sb,
+				       EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE)) {
+			if (ctx->want_extra_isize < sb->s_want_extra_isize)
+				ctx->want_extra_isize = sb->s_want_extra_isize;
+			if (ctx->want_extra_isize < sb->s_min_extra_isize)
+				ctx->want_extra_isize = sb->s_min_extra_isize;
+		}
+	}
+	else {
+		if (sb->s_feature_ro_compat &
+		    EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE) {
+			fix_problem(ctx, PR_0_CLEAR_EXTRA_ISIZE, &pctx);
+			sb->s_feature_ro_compat &=
+					~EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE;
+		}
+		sb->s_want_extra_isize = 0;
+		sb->s_min_extra_isize = 0;
+		ctx->flags &= ~E2F_FLAG_EXPAND_EISIZE;
+	}
+
+	if (ctx->options & E2F_OPT_READONLY) {
+		if (ctx->flags & (E2F_FLAG_EXPAND_EISIZE)) {
+			fprintf(stderr, _("Cannot enable EXTRA_ISIZE feature "
+					  "on read-only filesystem\n"));
+			exit(1);
+		}
+	} else {
+		if (sb->s_want_extra_isize > sb->s_min_extra_isize &&
+		    (sb->s_feature_ro_compat & EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE))
+			ctx->flags |= E2F_FLAG_EXPAND_EISIZE;
+	}
+
 	check_resize_inode(ctx);
 	if (bad_blocks_file)
 		read_bad_blocks_file(ctx, bad_blocks_file, replace_bad_blocks);
@@ -1359,7 +1716,8 @@ print_unsupp_features:
 	 * find the default journal size.
 	 */
 	if (sb->s_jnl_backup_type == EXT3_JNL_BACKUP_BLOCKS)
-		journal_size = sb->s_jnl_blocks[16] >> 20;
+		journal_size = (sb->s_jnl_blocks[15] << (32 - 20)) |
+			       (sb->s_jnl_blocks[16] >> 20);
 	else
 		journal_size = -1;
 
@@ -1487,6 +1845,12 @@ no_journal:
 	ext2fs_close(fs);
 	ctx->fs = NULL;
 	free(ctx->journal_name);
+	if (ctx->lfsck_oinfo)
+		e2fsck_lfsck_cleanupdb(ctx);
+	if (ctx->lustre_mdsdb)
+		free(ctx->lustre_mdsdb);
+	if (ctx->lustre_ostdb)
+		free(ctx->lustre_ostdb);
 
 	e2fsck_free_context(ctx);
 	remove_error_table(&et_ext2_error_table);

@@ -279,6 +279,8 @@ _("Warning: the backup superblock/group descriptors at block %u contain\n"
 				ext2fs_group_desc_csum_set(fs, group);
 				fs->super->s_free_blocks_count++;
 			}
+			/* The kernel doesn't need to zero the itable blocks */
+			fs->group_desc[i].bg_flags |= EXT2_BG_INODE_ZEROED;
 		}
 		group_block += fs->super->s_blocks_per_group;
 	}
@@ -555,6 +557,10 @@ static void create_journal_dev(ext2_filsys fs)
 			_("while initializing journal superblock"));
 		exit(1);
 	}
+
+	if (journal_flags & EXT2_MKJOURNAL_LAZYINIT)
+		goto write_superblock;
+
 	if (quiet)
 		memset(&progress, 0, sizeof(progress));
 	else
@@ -582,6 +588,8 @@ static void create_journal_dev(ext2_filsys fs)
 	}
 	ext2fs_zero_blocks(0, 0, 0, 0, 0);
 
+	progress_close(&progress);
+write_superblock:
 	retval = io_channel_write_blk(fs->io,
 				      fs->super->s_first_data_block+1,
 				      1, buf);
@@ -590,7 +598,6 @@ static void create_journal_dev(ext2_filsys fs)
 			_("while writing journal superblock"));
 		exit(1);
 	}
-	progress_close(&progress);
 }
 
 static void show_stats(ext2_filsys fs)
@@ -801,6 +808,12 @@ static void parse_extended_opts(struct ext2_super_block *param,
 			}
 		} else if (!strcmp(token, "test_fs")) {
 			param->s_flags |= EXT2_FLAGS_TEST_FILESYS;
+		} else if (!strcmp(token, "lazy_journal_init")) {
+			if (arg)
+				journal_flags |= strtoul(arg, &p, 0) ?
+						EXT2_MKJOURNAL_LAZYINIT : 0;
+			else
+				journal_flags |= EXT2_MKJOURNAL_LAZYINIT;
 		} else if (!strcmp(token, "lazy_itable_init")) {
 			if (arg)
 				lazy_itable_init = strtoul(arg, &p, 0);
@@ -825,6 +838,7 @@ static void parse_extended_opts(struct ext2_super_block *param,
 			"\tstripe-width=<RAID stride * data disks in blocks>\n"
 			"\tresize=<resize maximum size in blocks>\n"
 			"\tlazy_itable_init=<0 to disable, 1 to enable>\n"
+			"\tlazy_journal_init=<0 to disable, 1 to enable>\n"
 			"\ttest_fs\n"
 			"\tdiscard\n"
 			"\tnodiscard\n\n"),
@@ -852,7 +866,10 @@ static __u32 ok_features[3] = {
 		EXT3_FEATURE_INCOMPAT_EXTENTS|
 		EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|
 		EXT2_FEATURE_INCOMPAT_META_BG|
-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
+		EXT4_FEATURE_INCOMPAT_FLEX_BG|
+		EXT4_FEATURE_INCOMPAT_EA_INODE|
+		EXT4_FEATURE_INCOMPAT_MMP|
+		EXT4_FEATURE_INCOMPAT_DIRDATA,
 	/* R/O compat */
 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE|
 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
@@ -1404,7 +1421,7 @@ static void PRS(int argc, char *argv[])
 			}
 			break;
 		case 'v':
-			verbose = 1;
+			verbose++;
 			break;
 		case 'F':
 			force++;
@@ -1787,6 +1804,9 @@ got_size:
 	lazy_itable_init = get_bool_from_profile(fs_types,
 						 "lazy_itable_init",
 						 lazy_itable_init);
+	journal_flags |= get_bool_from_profile(fs_types,
+					       "lazy_journal_init", 0) ?
+						EXT2_MKJOURNAL_LAZYINIT : 0;
 	discard = get_bool_from_profile(fs_types, "discard" , discard);
 
 	/* Get options from profile */
@@ -2349,6 +2369,20 @@ int main (int argc, char *argv[])
 	}
 no_journal:
 
+	if (!super_only) {
+		ext2fs_set_gdt_csum(fs);
+		if (fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) {
+			retval = ext2fs_mmp_init(fs);
+			if (retval) {
+				fprintf(stderr, _("\nError while enabling "
+					"multiple mount protection feature."));
+				exit(1);
+			}
+			printf(_("Multiple mount protection has been enabled "
+				 "with update interval %d seconds.\n"),
+				 fs->super->s_mmp_update_interval);
+		}
+	}
 	if (!quiet)
 		printf(_("Writing superblocks and "
 		       "filesystem accounting information: "));

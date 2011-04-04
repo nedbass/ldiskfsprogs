@@ -154,6 +154,22 @@ errcode_t ext2fs_extent_header_verify(void *ptr, int size)
 	return 0;
 }
 
+/* DEPRECATED: Used for disp-extent-header patch until it is updated */
+errcode_t ext2fs_read_ext_block(ext2_filsys fs, blk_t blk, void *buf)
+{
+	errcode_t       retval;
+
+	if ((fs->flags & EXT2_FLAG_IMAGE_FILE) &&
+	    (fs->io != fs->image_io))
+		memset(buf, 0, fs->blocksize);
+	else {
+		retval = io_channel_read_blk(fs->io, blk, 1, buf);
+		if (retval)
+			return retval;
+	}
+
+	return 0;
+}
 
 /*
  * Begin functions to handle an inode's extent information
@@ -258,9 +274,8 @@ extern errcode_t ext2fs_extent_open2(ext2_filsys fs, ext2_ino_t ino,
 	handle->path[0].max_entries = ext2fs_le16_to_cpu(eh->eh_max);
 	handle->path[0].curr = 0;
 	handle->path[0].end_blk =
-		((((__u64) handle->inode->i_size_high << 32) +
-		  handle->inode->i_size + (fs->blocksize - 1))
-		 >> EXT2_BLOCK_SIZE_BITS(fs->super));
+		(EXT2_I_SIZE(handle->inode) + fs->blocksize - 1) >>
+		 EXT2_BLOCK_SIZE_BITS(fs->super);
 	handle->path[0].visit_num = 1;
 	handle->level = 0;
 	handle->magic = EXT2_ET_MAGIC_EXTENT_HANDLE;

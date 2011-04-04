@@ -129,7 +129,7 @@ static struct field_set_info super_fields[] = {
 	{ "flags", &set_sb.s_flags, 4, parse_uint },
 	{ "raid_stride", &set_sb.s_raid_stride, 2, parse_uint },
 	{ "min_extra_isize", &set_sb.s_min_extra_isize, 4, parse_uint },
-	{ "mmp_interval", &set_sb.s_mmp_interval, 2, parse_uint },
+	{ "mmp_update_interval", &set_sb.s_mmp_update_interval, 2, parse_uint },
 	{ "mmp_block", &set_sb.s_mmp_block, 8, parse_uint },
 	{ "raid_stripe_width", &set_sb.s_raid_stripe_width, 4, parse_uint },
 	{ "log_groups_per_flex", &set_sb.s_log_groups_per_flex, 1, parse_uint },
@@ -576,6 +576,7 @@ void do_set_block_group_descriptor(int argc, char *argv[])
 	}
 
 	set_gd = current_fs->group_desc[set_bg];
+	set_sb = *current_fs->super;
 
 	if (ss->func(ss, argv[3]) == 0) {
 		current_fs->group_desc[set_bg] = set_gd;

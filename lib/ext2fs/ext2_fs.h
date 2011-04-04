@@ -427,6 +427,12 @@ struct ext2_inode_large {
 
 #define i_size_high	i_dir_acl
 
+#define EXT2_FITS_IN_INODE(inode, field)	      \
+	((offsetof(struct ext2_inode_large, field) +    \
+	 sizeof((inode)->field)) <=		     \
+			 (EXT2_GOOD_OLD_INODE_SIZE +    \
+			  (inode)->i_extra_isize))      \
+
 #if defined(__KERNEL__) || defined(__linux__)
 #define i_reserved1	osd1.linux1.l_i_reserved1
 #define i_frag		osd2.linux2.l_i_frag
@@ -588,7 +594,7 @@ struct ext2_super_block {
 	__u16	s_want_extra_isize; 	/* New inodes should reserve # bytes */
 	__u32	s_flags;		/* Miscellaneous flags */
 	__u16   s_raid_stride;		/* RAID stride */
-	__u16   s_mmp_interval;         /* # seconds to wait in MMP checking */
+	__u16   s_mmp_update_interval;  /* # seconds to wait in MMP checking */
 	__u64   s_mmp_block;            /* Block for multi-mount protection */
 	__u32   s_raid_stripe_width;    /* blocks on all data disks (N*stride)*/
 	__u8	s_log_groups_per_flex;	/* FLEX_BG group size */
@@ -687,11 +693,28 @@ struct ext2_super_block {
 
 
 #define EXT2_FEATURE_COMPAT_SUPP	0
-#define EXT2_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE)
+#define EXT2_FEATURE_INCOMPAT_SUPP    (EXT2_FEATURE_INCOMPAT_FILETYPE| \
+				       EXT4_FEATURE_INCOMPAT_MMP|\
+				       EXT4_FEATURE_INCOMPAT_EA_INODE|\
+				       EXT4_FEATURE_INCOMPAT_DIRDATA)
 #define EXT2_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER| \
 					 EXT2_FEATURE_RO_COMPAT_LARGE_FILE| \
 					 EXT4_FEATURE_RO_COMPAT_DIR_NLINK| \
+					 EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE| \
 					 EXT2_FEATURE_RO_COMPAT_BTREE_DIR)
+
+#define EXT2_FT_MASK			0x0f
+
+/* lu_fid size and NUL char */
+#define EXT2_DIRENT_LUFID_SIZE		(17 + 1)
+#define EXT2_DIRENT_LUFID		0x10
+#define EXT2_DIR_PAD			4
+#define EXT2_DIR_ROUND			(EXT2_DIR_PAD - 1)
+#define __EXT2_DIR_REC_LEN(len)		(((len) + 8 + EXT2_DIR_ROUND) & \
+					 ~EXT2_DIR_ROUND)
+
+#define EXT2_DIR_REC_LEN(de)		(__EXT2_DIR_REC_LEN(de->name_len +\
+					 ext2_get_dirent_size(de)))
 
 /*
  * Default values for user and/or group using reserved blocks
@@ -758,38 +781,39 @@ struct ext2_dir_entry_2 {
 #define EXT2_FT_MAX		8
 
 /*
- * EXT2_DIR_PAD defines the directory entries boundaries
- *
- * NOTE: It must be a multiple of 4
- */
-#define EXT2_DIR_PAD			4
-#define EXT2_DIR_ROUND			(EXT2_DIR_PAD - 1)
-#define EXT2_DIR_REC_LEN(name_len)	(((name_len) + 8 + EXT2_DIR_ROUND) & \
-					 ~EXT2_DIR_ROUND)
-
-/*
  * This structure will be used for multiple mount protection. It will be
  * written into the block number saved in the s_mmp_block field in the
- * superblock.
+ * superblock. Programs that check MMP should assume that if SEQ_FSCK
+ * (or any unknown code above SEQ_MAX) is present then it is NOT safe
+ * to use the filesystem, regardless of how old the timestamp is.
  */
-#define	EXT2_MMP_MAGIC    0x004D4D50 /* ASCII for MMP */
-#define	EXT2_MMP_CLEAN    0xFF4D4D50 /* Value of mmp_seq for clean unmount */
-#define	EXT2_MMP_FSCK_ON  0xE24D4D50 /* Value of mmp_seq when being fscked */
+#define EXT2_MMP_MAGIC     0x004D4D50U /* ASCII for MMP */
+#define EXT2_MMP_SEQ_CLEAN 0xFF4D4D50U /* mmp_seq value for clean unmount */
+#define EXT2_MMP_SEQ_FSCK  0xE24D4D50U /* mmp_seq value when being fscked */
+#define EXT2_MMP_SEQ_MAX   0xE24D4D4FU /* maximum valid mmp_seq value */
 
 struct mmp_struct {
-	__u32	mmp_magic;
-	__u32	mmp_seq;
-	__u64	mmp_time;
-	char	mmp_nodename[64];
-	char	mmp_bdevname[32];
-	__u16	mmp_interval;
+	__u32	mmp_magic;		/* Magic number for MMP */
+	__u32	mmp_seq;		/* Sequence no. updated periodically */
+	__u64	mmp_time;		/* Time last updated */
+	char	mmp_nodename[64];	/* Node which last updated MMP block */
+	char	mmp_bdevname[32];	/* Bdev which last updated MMP block */
+	__u16	mmp_check_interval;	/* Changed mmp_check_interval */
 	__u16	mmp_pad1;
-	__u32	mmp_pad2;
+	__u32	mmp_pad2[227];
 };
 
 /*
- * Interval in number of seconds to update the MMP sequence number.
+ * Default interval in seconds to update the MMP sequence number.
  */
-#define EXT2_MMP_DEF_INTERVAL	5
+#define EXT2_MMP_UPDATE_INTERVAL	1
+
+/*
+ * Minimum interval for MMP checking in seconds.
+ */
+#define EXT2_MMP_MIN_CHECK_INTERVAL     5
+
+int ext2_get_dirent_dirdata_size(struct ext2_dir_entry_2 *de, char dirdata_flags);
+int ext2_get_dirent_size(struct ext2_dir_entry_2 *de);
 
 #endif	/* _LINUX_EXT2_FS_H */

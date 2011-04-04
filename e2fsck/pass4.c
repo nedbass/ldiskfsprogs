@@ -11,6 +11,7 @@
  * Pass 4 frees the following data structures:
  * 	- A bitmap of which inodes are in bad blocks.	(inode_bb_map)
  * 	- A bitmap of which inodes are imagic inodes.	(inode_imagic_map)
+ *	- A bitmap of EA inodes.			(inode_ea_map)
  */
 
 #include "e2fsck.h"
@@ -39,6 +40,20 @@ static int disconnect_inode(e2fsck_t ctx, ext2_ino_t i,
 	} else {
 		e2fsck_read_inode(ctx, i, inode, "pass4: disconnect_inode");
 	}
+
+	if (inode->i_flags & EXT4_EA_INODE_FL) {
+		if (ext2fs_test_inode_bitmap(ctx->inode_ea_map, i)) {
+			ext2fs_icount_store(ctx->inode_count, i, 1);
+			return 0;
+		} else {
+			/* Zero the link count so that when inode is linked to
+			 * lost+found it has correct link count */
+			inode->i_links_count = 0;
+			e2fsck_write_inode(ctx, i, inode, "disconnect_inode");
+			ext2fs_icount_store(ctx->inode_link_info, i, 0);
+		}
+	}
+
 	clear_problem_context(&pctx);
 	pctx.ino = i;
 	pctx.inode = inode;
@@ -181,6 +196,9 @@ void e2fsck_pass4(e2fsck_t ctx)
 	}
 	ext2fs_free_icount(ctx->inode_link_info); ctx->inode_link_info = 0;
 	ext2fs_free_icount(ctx->inode_count); ctx->inode_count = 0;
+	ext2fs_free_icount(ctx->inode_badness); ctx->inode_badness = 0;
+	ext2fs_free_inode_bitmap(ctx->inode_ea_map);
+	ctx->inode_ea_map = 0;
 	ext2fs_free_inode_bitmap(ctx->inode_bb_map);
 	ctx->inode_bb_map = 0;
 	ext2fs_free_inode_bitmap(ctx->inode_imagic_map);
