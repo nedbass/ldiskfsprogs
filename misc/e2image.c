@@ -44,7 +44,7 @@ extern int optind;
 #include "../version.h"
 #include "nls-enable.h"
 
-const char * program_name = "e2image";
+const char * program_name = IMAGEPROG;
 char * device_name = NULL;
 
 static void usage(void)
@@ -644,7 +644,7 @@ int main (int argc, char ** argv)
 	bindtextdomain(NLS_CAT_NAME, LOCALEDIR);
 	textdomain(NLS_CAT_NAME);
 #endif
-	fprintf (stderr, "e2image %s (%s)\n", E2FSPROGS_VERSION,
+	fprintf (stderr, "%s %s (%s)\n", IMAGEPROG, E2FSPROGS_VERSION,
 		 E2FSPROGS_DATE);
 	if (argc && *argv)
 		program_name = *argv;

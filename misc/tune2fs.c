@@ -59,7 +59,7 @@ extern int optind;
 #include "../version.h"
 #include "nls-enable.h"
 
-const char *program_name = "tune2fs";
+const char *program_name = TUNEFSPROG;
 char *device_name;
 char *new_label, *new_last_mounted, *new_UUID;
 char *io_options;
@@ -95,8 +95,6 @@ struct blk_move {
 	blk64_t new_loc;
 };
 
-
-static const char *please_fsck = N_("Please run e2fsck on the filesystem.\n");
 
 #ifdef CONFIG_BUILD_FINDFS
 void do_findfs(int argc, char **argv);
@@ -350,7 +348,7 @@ static void request_fsck_afterwards(ext2_filsys fs)
 	if (requested++)
 		return;
 	fs->super->s_state &= ~EXT2_VALID_FS;
-	printf("\n%s\n", _(please_fsck));
+	printf("\nPlease run %s on the filesystem.\n", FSCKPROG);
 	if (mount_flags & EXT2_MF_READONLY)
 		printf(_("(and reboot afterwards!)\n"));
 }
@@ -408,9 +406,9 @@ static int update_feature_set(ext2_filsys fs, char *features)
 		}
 		if (sb->s_feature_incompat &
 		    EXT3_FEATURE_INCOMPAT_RECOVER) {
-			fputs(_("The needs_recovery flag is set.  "
-				"Please run e2fsck before clearing\n"
-				"the has_journal flag.\n"), stderr);
+			fprintf(stderr, _("The needs_recovery flag is set.  "
+				"Please run %s before clearing\n"
+				"the has_journal flag.\n"), FSCKPROG);
 			return 1;
 		}
 		if (sb->s_journal_inum) {
@@ -665,7 +663,7 @@ err:
 static void parse_e2label_options(int argc, char ** argv)
 {
 	if ((argc < 2) || (argc > 3)) {
-		fputs(_("Usage: e2label device [newlabel]\n"), stderr);
+		fprintf(stderr, _("Usage: %s device [newlabel]\n"), LABELPROG);
 		exit(1);
 	}
 	io_options = strchr(argv[1], '?');
@@ -673,7 +671,7 @@ static void parse_e2label_options(int argc, char ** argv)
 		*io_options++ = 0;
 	device_name = blkid_get_devname(NULL, argv[1], NULL);
 	if (!device_name) {
-		com_err("e2label", 0, _("Unable to resolve '%s'"),
+		com_err(LABELPROG, 0, _("Unable to resolve '%s'"),
 			argv[1]);
 		exit(1);
 	}
@@ -1687,9 +1685,9 @@ static int tune2fs_setup_tdb(const char *name, io_manager *io_ptr)
 	set_undo_io_backing_manager(*io_ptr);
 	*io_ptr = undo_io_manager;
 	set_undo_io_backup_file(tdb_file);
-	printf(_("To undo the tune2fs operation please run "
+	printf(_("To undo the %s operation please run "
 		 "the command\n    e2undo %s %s\n\n"),
-		 tdb_file, name);
+		 TUNEFSPROG, tdb_file, name);
 	free(tdb_file);
 	free(tmp_name);
 	return retval;
@@ -1717,7 +1715,7 @@ int main(int argc, char **argv)
 	if (strcmp(get_progname(argv[0]), "findfs") == 0)
 		do_findfs(argc, argv);
 #endif
-	if (strcmp(get_progname(argv[0]), "e2label") == 0)
+	if (strcmp(get_progname(argv[0]), LABELPROG) == 0)
 		parse_e2label_options(argc, argv);
 	else
 		parse_tune2fs_options(argc, argv);
@@ -1742,12 +1740,13 @@ retry_open:
 			device_name);
 		if (retval == EXT2_ET_MMP_FSCK_ON)
 			fprintf(stderr,
-				_("If you are sure e2fsck is not running then "
-				  "use 'tune2fs -f -E clear_mmp {device}'\n"));
+				_("If you are sure %s is not running then "
+				  "use '%s -f -E clear_mmp {device}'\n"),
+				   FSCKPROG, TUNEFSPROG);
 		else if (retval == EXT2_ET_MMP_MAGIC_INVALID)
 			fprintf(stderr,
 				_("Magic for mmp is wrong. Try to fix it by "
-				  "using 'fsck {device}'\n"));
+				  "using '%s {device}'\n"), FSCKPROG);
 		else if (retval != EXT2_ET_MMP_FAILED)
 			fprintf(stderr,
 			     _("Couldn't find valid filesystem superblock.\n"));
@@ -1874,8 +1873,8 @@ retry_open:
 				EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER;
 			sb->s_state &= ~EXT2_VALID_FS;
 			ext2fs_mark_super_dirty(fs);
-			printf(_("\nSparse superblock flag set.  %s"),
-			       _(please_fsck));
+			printf(_("\nSparse superblock flag set.  "
+				"Please run %s on the filesystem."), FSCKPROG);
 		}
 	}
 	if (s_flag == 0) {

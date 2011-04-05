@@ -4,42 +4,46 @@
 %define	_root_etcdir	/etc
 
 Summary: Utilities for managing ext2/ext3/ext4 filesystems
-Name: e2fsprogs
+Name: @E2FSPROGS@
 Version: @E2FSPROGS_PKGVER@
 Release: 0%{_vendor}
 License: GPLv2
 Group: System Environment/Base
-Source:  ftp://download.sourceforge.net/pub/sourceforge/e2fsprogs/e2fsprogs-%{version}.tar.gz
+Source:  ftp://download.sourceforge.net/pub/sourceforge/e2fsprogs/%{name}-%{version}.tar.gz
 Url: http://build.whamcloud.com/job/e2fsprogs/
-Prereq: /sbin/ldconfig
+Requires(pre): /sbin/ldconfig
 BuildRoot: %{_tmppath}/%{name}-root
 %if %{_vendor} == "suse"
 Group: System/Filesystems
 @LFSCK_CMT@Requires: db >= @DB4VERSION@
 @LFSCK_CMT@BuildRequires: db-devel >= 4.1 texinfo
-Provides: e2fsbn ext2fs libcom_err = %{version} ldiskfsprogs = %{version}
-Obsoletes: ext2fs libcom_err < %{version}
+@E2FSPROGS_CMT@Provides: e2fsbn ext2fs libcom_err = %{version} ldiskfsprogs = %{version}
+@E2FSPROGS_CMT@Obsoletes: ext2fs libcom_err < %{version}
 %else
 Group: System Environment/Base
 @LFSCK_CMT@Requires: db4 >= @DB4VERSION@
 @LFSCK_CMT@BuildRequires: db4-devel >= 4.1 texinfo
-Provides: e2fsprogs-libs = %{version} ldiskfsprogs = %{version}
-Obsoletes: e4fsprogs e2fsprogs-libs < %{version}
+@E2FSPROGS_CMT@Provides: e2fsprogs-libs = %{version} ldiskfsprogs = %{version}
+@E2FSPROGS_CMT@Provides: ldiskfsprogs = %{version}
+@E2FSPROGS_CMT@Obsoletes: e4fsprogs e2fsprogs-libs < %{version}
+%endif
+%if %{name} == "e2fsprogs"
+Provides: e2fsprogs-libs = %{version}
 %endif
 
 %description
-The e2fsprogs package contains a number of utilities for creating,
+The @E2FSPROGS@ package contains a number of utilities for creating,
 checking, modifying, and correcting any inconsistencies in ext2, ext3,
-and ext4 filesystems.  E2fsprogs contains e2fsck (used to repair
-filesystem inconsistencies after an unclean shutdown), mke2fs (used to
-initialize a partition to contain an empty ext2 filesystem), debugfs
+and ext4 filesystems.  @E2FSPROGS@ contains @FSCKPROG@ (used to repair
+filesystem inconsistencies after an unclean shutdown), @MKFSPROG@ (used to
+initialize a partition to contain an empty ext2 filesystem), @DEBUGFSPROG@
 (used to examine the internal structure of a filesystem, to manually
 repair a corrupted filesystem or to create test cases for e2fsck),
-tune2fs (used to modify filesystem parameters), resize2fs to grow and
+@TUNEFSPROG@ (used to modify filesystem parameters), @RESIZEFSPROG@ to grow and
 shrink unmounted ext2 filesystems, and most of the other core ext2fs
 filesystem utilities.
 
-You should install the e2fsprogs package if you are using any ext2,
+You should install the @E2FSPROGS@ package if you are using any ext2,
 ext3, or ext4 filesystems (if you're not sure, you probably should
 install this package).  You may also need to install it (even if you
 don't use ext2/ext3/ext4) for the libuuid and libblkid libraries and
@@ -49,7 +53,7 @@ fsck tool that are included here.
 Summary: Ext2 filesystem-specific static libraries and headers.
 Group: Development/Libraries
 Requires: e2fsprogs = %{version}
-Prereq: /sbin/install-info
+Requires(pre): /sbin/install-info
 
 %description devel
 E2fsprogs-devel contains the libraries and header files needed to
@@ -75,26 +79,37 @@ SMP systems.
 %setup
 
 %build
+%if %{name} == "ldiskfsprogs"
+LDISKFS_OPTS="--with-ldiskfsprogs --disable-elf-shlibs"
+%endif
 %configure --enable-elf-shlibs --enable-nls --with-lustre=@LUSTRE@ \
-	%{?extra_config_flags:%extra_config_flags} @LFSCK_CMT@ --enable-lfsck
+	%{?extra_config_flags:%extra_config_flags} $LDISKFS_OPTS \
+	@LFSCK_CMT@ --enable-lfsck
 make
-make check
 
 %install
 rm -rf $RPM_BUILD_ROOT
 export PATH=/sbin:$PATH
-make install install-libs DESTDIR="$RPM_BUILD_ROOT" \
+make install DESTDIR="$RPM_BUILD_ROOT" \
 	root_sbindir=%{_root_sbindir} root_libdir=%{_root_libdir}
+%if %{name} == "e2fsprogs"
+make install-libs DESTDIR="$RPM_BUILD_ROOT" \
+ 	root_sbindir=%{_root_sbindir} root_libdir=%{_root_libdir}
 /sbin/ldconfig -n ${RPM_BUILD_ROOT}%{_libdir}
+%endif
 
 # Add a dir that uuidd needs that the Makefiles don't create
 install -d $RPM_BUILD_ROOT/var/lib/libuuid
+
+# Give user write access to avoid errors from brp-strip-static-archive
+chmod -R u+w $RPM_BUILD_ROOT
 
 %find_lang %{name}
 
 %clean
 rm -rf $RPM_BUILD_ROOT
 
+%if %{name} == "e2fsprogs"
 %post -p /sbin/ldconfig
 
 %postun -p /sbin/ldconfig
@@ -117,18 +132,14 @@ getent passwd uuidd >/dev/null || \
 useradd -r -g uuidd -d /var/lib/libuuid -s /sbin/nologin \
     -c "UUID generator helper daemon" uuidd
 exit 0
+%endif
 
 %files -f %{name}.lang
 %defattr(-,root,root)
 %doc README RELEASE-NOTES
-
+%if %{name} == "e2fsprogs"
 %{_root_sbindir}/badblocks
 %{_root_sbindir}/blkid
-%{_root_sbindir}/debugfs
-%{_root_sbindir}/dumpe2fs
-%{_root_sbindir}/e2fsck
-%{_root_sbindir}/e2image
-%{_root_sbindir}/e2label
 %{_root_sbindir}/e2undo
 %{_root_sbindir}/findfs
 %{_root_sbindir}/fsck
@@ -137,21 +148,29 @@ exit 0
 %{_root_sbindir}/fsck.ext4
 %{_root_sbindir}/fsck.ext4dev
 %{_root_sbindir}/logsave
-%{_root_sbindir}/mke2fs
-%{_root_etcdir}/mke2fs.conf
 %{_root_sbindir}/mkfs.ext2
 %{_root_sbindir}/mkfs.ext3
 %{_root_sbindir}/mkfs.ext4
 %{_root_sbindir}/mkfs.ext4dev
-%{_root_sbindir}/resize2fs
-%{_root_sbindir}/tune2fs
 %{_sbindir}/filefrag
 %{_sbindir}/mklost+found
 %{_sbindir}/e2freefrag
 %{_sbindir}/e4defrag
+%endif
+%{_root_sbindir}/@DEBUGFSPROG@
+%{_root_sbindir}/@DUMPFSPROG@
+%{_root_sbindir}/@FSCKPROG@
+%{_root_sbindir}/@PFSCKPROG@
+%{_root_sbindir}/@IMAGEPROG@
+%{_root_sbindir}/@LABELPROG@
+%{_root_sbindir}/@MKFSPROG@
+%{_root_sbindir}/@RESIZEFSPROG@
+%{_root_sbindir}/@TUNEFSPROG@
 @LFSCK_CMT@%{_sbindir}/lfsck
 @E2SCAN_CMT@%{_sbindir}/e2scan
+%{_root_etcdir}/@MKFSPROG@.conf
 
+%if %{name} == "e2fsprogs"
 %{_root_libdir}/libblkid.so.*
 %{_root_libdir}/libcom_err.so.*
 %{_root_libdir}/libe2p.so.*
@@ -164,42 +183,47 @@ exit 0
 %{_bindir}/chattr
 %{_bindir}/lsattr
 %{_bindir}/uuidgen
+%endif
+
+%if %{name} == "e2fsprogs"
 %{_mandir}/man1/chattr.1*
 %{_mandir}/man1/lsattr.1*
 %{_mandir}/man1/uuidgen.1*
 
-%{_mandir}/man5/e2fsck.conf.5*
-%{_mandir}/man5/mke2fs.conf.5*
-
 %{_mandir}/man8/badblocks.8*
 %{_mandir}/man8/blkid.8*
-%{_mandir}/man8/debugfs.8*
-%{_mandir}/man8/dumpe2fs.8*
-%{_mandir}/man8/e2fsck.8*
-@LFSCK_CMT@%{_mandir}/man8/lfsck.8*
 %{_mandir}/man8/findfs.8*
 %{_mandir}/man8/fsck.ext2.8*
 %{_mandir}/man8/fsck.ext3.8*
 %{_mandir}/man8/fsck.ext4.8*
 %{_mandir}/man8/fsck.ext4dev.8*
-%{_mandir}/man8/e2image.8*
-%{_mandir}/man8/e2label.8*
-@E2SCAN_CMT@%{_mandir}/man8/e2scan.8*
 %{_mandir}/man8/e2undo.8*
 %{_mandir}/man8/fsck.8*
 %{_mandir}/man8/logsave.8*
-%{_mandir}/man8/mke2fs.8*
 %{_mandir}/man8/mkfs.ext2.8*
 %{_mandir}/man8/mkfs.ext3.8*
 %{_mandir}/man8/mkfs.ext4.8*
 %{_mandir}/man8/mkfs.ext4dev.8*
 %{_mandir}/man8/mklost+found.8*
-%{_mandir}/man8/resize2fs.8*
-%{_mandir}/man8/tune2fs.8*
 %{_mandir}/man8/filefrag.8*
 %{_mandir}/man8/e2freefrag.8*
 %{_mandir}/man8/e4defrag.8*
+%endif
+%{_mandir}/man8/@DEBUGFSPROG@.8*
+%{_mandir}/man8/@DUMPFSPROG@.8*
+%{_mandir}/man8/@FSCKPROG@.8*
+%{_mandir}/man8/@PFSCKPROG@.8*
+%{_mandir}/man8/@IMAGEPROG@.8*
+%{_mandir}/man8/@LABELPROG@.8*
+%{_mandir}/man8/@MKFSPROG@.8*
+%{_mandir}/man8/@RESIZEFSPROG@.8*
+%{_mandir}/man8/@TUNEFSPROG@.8*
+@LFSCK_CMT@%{_mandir}/man8/lfsck.8*
+@E2SCAN_CMT@%{_mandir}/man8/e2scan.8*
+%{_mandir}/man5/@FSCKPROG@.conf.5*
+%{_mandir}/man5/@MKFSPROG@.conf.5*
 
+%if %{name} == "e2fsprogs"
 %files devel
 %defattr(-,root,root)
 %{_infodir}/libext2fs.info*
@@ -258,4 +282,4 @@ exit 0
 %{_mandir}/man8/uuidd.8*
 %attr(6755, uuidd, uuidd) %{_sbindir}/uuidd
 %dir %attr(2775, uuidd, uuidd) /var/lib/libuuid
-
+%endif

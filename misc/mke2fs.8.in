@@ -2,11 +2,11 @@
 .\" Copyright 1993, 1994, 1995 by Theodore Ts'o.  All Rights Reserved.
 .\" This file may be copied under the terms of the GNU Public License.
 .\"
-.TH MKE2FS 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.TH @MKFSPROG@ 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "@E2FSPROGS@ version @E2FSPROGS_VERSION@"
 .SH NAME
-mke2fs \- create an ext2/ext3/ext4 filesystem
+@MKFSPROG@ \- create an ext2/ext3/ext4 filesystem
 .SH SYNOPSIS
-.B mke2fs
+.B @MKFSPROG@
 [
 .B \-c
 |
@@ -111,7 +111,7 @@ mke2fs \- create an ext2/ext3/ext4 filesystem
 .I blocks-count
 ]
 @JDEV@.sp
-@JDEV@.B "mke2fs \-O journal_dev"
+@JDEV@.B "@MKFSPROG@ \-O journal_dev"
 @JDEV@[
 @JDEV@.B \-b
 @JDEV@.I block-size
@@ -139,7 +139,7 @@ mke2fs \- create an ext2/ext3/ext4 filesystem
 @JDEV@.I blocks-count
 @JDEV@]
 .SH DESCRIPTION
-.B mke2fs
+.B @MKFSPROG@
 is used to create an ext2, ext3, or ext4 filesystem, usually in a disk
 partition.
 .I device
@@ -147,7 +147,7 @@ is the special file corresponding to the device (e.g
 .IR /dev/hdXX ).
 .I blocks-count
 is the number of blocks on the device.  If omitted,
-.B mke2fs
+.B @MKFSPROG@
 automagically figures the file system size.  If called as
 .B mkfs.ext3
 a journal is created as if the
@@ -171,7 +171,7 @@ the expected usage of the filesystem (see the
 option).  If
 .I block-size
 is preceded by a negative sign ('-'), then
-.B mke2fs
+.B @MKFSPROG@
 will use heuristics to determine the
 appropriate block size, with the constraint that the block size will be
 at least
@@ -191,7 +191,7 @@ separated, and may take an argument using the equals ('=') sign.  The
 option used to be
 .B \-R
 in earlier versions of
-.BR mke2fs .
+.BR @MKFSPROG@ .
 The
 .B \-R
 option is still accepted for backwards compatibility.   The
@@ -205,7 +205,7 @@ filesystem blocks. This is the number of blocks read or written to disk
 before moving to the next disk, which is sometimes referred to as the
 .I chunk size.
 This mostly affects placement of filesystem metadata like bitmaps at
-.B mke2fs
+.B @MKFSPROG@
 time to avoid placing them on a single disk, which can hurt performance.
 It may also be used by the block allocator.
 .TP
@@ -227,7 +227,7 @@ blocks.
 .B lazy_itable_init\fR[\fB= \fI<0 to disable, 1 to enable>\fR]
 If enabled and the uninit_bg feature is enabled, the inode table will
 not be fully initialized by
-.BR mke2fs .
+.BR @MKFSPROG@ .
 This speeds up filesystem
 initialization noticeably, but it requires the kernel to finish
 initializing the filesystem in the background when the filesystem is
@@ -236,7 +236,7 @@ enable lazy inode table zeroing.
 .TP
 .B lazy_journal_init\fR[\fB= \fI<0 to disable, 1 to enable>\fR]
 If enabled, the journal inode will not be fully zeroed out by
-.BR mke2fs .
+.BR @MKFSPROG@ .
 This speeds up filesystem initialization noticeably, but carries some
 small risk if the system crashes before the journal has been overwritten
 entirely one time.  If the option value is omitted, it defaults to 1 to
@@ -263,11 +263,11 @@ Specify the size of fragments in bytes.
 .TP
 .B \-F
 Force
-.B mke2fs
+.B @MKFSPROG@
 to create a filesystem, even if the specified device is not a partition
 on a block special device, or if other parameters do not make sense.
 In order to force
-.B mke2fs
+.B @MKFSPROG@
 to create a filesystem even if the filesystem appears to be in use
 or is mounted (a truly dangerous thing to do), this option must be
 specified twice.
@@ -295,7 +295,7 @@ filesystem feature is enabled.
 .TP
 .BI \-i " bytes-per-inode"
 Specify the bytes/inode ratio.
-.B mke2fs
+.B @MKFSPROG@
 creates an inode for every
 .I bytes-per-inode
 bytes of space on the disk.  The larger the
@@ -309,7 +309,7 @@ correct value for this parameter.
 .TP
 .BI \-I " inode-size"
 Specify the size of each inode in bytes.
-.B mke2fs
+.B @MKFSPROG@
 creates 256-byte inodes by default.  In kernels after 2.6.10 and some
 earlier vendor kernels it is possible to utilize inodes larger than
 128 bytes to store
@@ -353,7 +353,7 @@ and may be no more than 102,400 filesystem blocks.
 @JDEV@The external
 @JDEV@journal must already have been created using the command
 @JDEV@.IP
-@JDEV@.B mke2fs -O journal_dev
+@JDEV@.B @MKFSPROG@ -O journal_dev
 @JDEV@.I external-journal
 @JDEV@.IP
 @JDEV@Note that
@@ -390,14 +390,14 @@ Read the bad blocks list from
 .IR filename .
 Note that the block numbers in the bad block list must be generated
 using the same block size as used by
-.BR mke2fs .
+.BR @MKFSPROG@ .
 As a result, the
 .B \-c
 option to
-.B mke2fs
+.B @MKFSPROG@
 is a much simpler and less error-prone method of checking a disk for bad
 blocks before formatting it, as
-.B mke2fs
+.B @MKFSPROG@
 will automatically pass the correct parameters to the
 .B badblocks
 program.
@@ -424,12 +424,12 @@ determine where the filesystem should be mounted.
 .TP
 .B \-n
 Causes
-.B mke2fs
+.B @MKFSPROG@
 to not actually create a filesystem, but display what it
 would do if it were to create a filesystem.  This can be used to
 determine the location of the backup superblocks for a particular
 filesystem, so long as the
-.B mke2fs
+.B @MKFSPROG@
 parameters that were passed when the
 filesystem was originally created are used again.  (With the
 .B \-n
@@ -446,7 +446,7 @@ of desired inodes directly.
 .BI \-o " creator-os"
 Overrides the default value of the "creator operating system" field of the
 filesystem.  The creator field is set by default to the name of the OS the
-.B mke2fs
+.B @MKFSPROG@
 executable was compiled for.
 .TP
 .B "\-O \fIfeature\fR[,...]"
@@ -504,7 +504,7 @@ Store file type information in directory entries.
 .B flex_bg
 Allow the per-block group metadata (allocation bitmaps and inode tables)
 to be placed anywhere on the storage media.  In addition,
-.B mke2fs
+.B @MKFSPROG@
 will place the per-block group metadata together starting at the first
 block group of each "flex_bg group".   The size of the flex_bg group
 can be specified using the 
@@ -533,7 +533,7 @@ Reserve space so the block group descriptor table may grow in the future.
 Useful for online resizing using
 .BR resize2fs .
 By default
-.B mke2fs
+.B @MKFSPROG@
 will attempt to reserve enough space so that the
 filesystem may grow to 1024 times its initial size.  This can be changed
 using the
@@ -557,7 +557,7 @@ recent Linux kernels.
 .TP
 .B \-q
 Quiet execution.  Useful if
-.B mke2fs
+.B @MKFSPROG@
 is run in a script.
 .TP
 .BI \-r " revision"
@@ -569,7 +569,7 @@ create revision 1 filesystems.
 Write superblock and group descriptors only.  This is useful if all of
 the superblock and backup superblocks are corrupted, and a last-ditch
 recovery method is desired.  It causes
-.B mke2fs
+.B @MKFSPROG@
 to reinitialize the
 superblock and group descriptors, while not touching the inode table
 and the block and inode bitmaps.  The
@@ -586,7 +586,7 @@ or there is no chance of recovery.
 .BI \-t " fs-type"
 Specify the filesystem type (i.e., ext2, ext3, ext4, etc.) that is to be created.
 If this option is not specified,
-.B mke2fs
+.B @MKFSPROG@
 will pick a default either via how
 the command was run (for example, using a name of the form mkfs.ext2,
 mkfs.ext3, etc.) or via a default as defined by the
@@ -603,15 +603,15 @@ option is used to explicitly add or remove filesystem options that
 should be set in the newly created filesystem, the
 resulting filesystem may not be supported by the requested
 .IR fs-type .
-(e.g., "\fBmke2fs \-t ext3 \-O extents /dev/sdXX\fR" will create a
+(e.g., "\fB@MKFSPROG@ \-t ext3 \-O extents /dev/sdXX\fR" will create a
 filesystem that is not supported by the ext3 implementation as found in
-the Linux kernel; and "\fBmke2fs \-t ext3 \-O ^has_journal /dev/hdXX\fR"
+the Linux kernel; and "\fB@MKFSPROG@ \-t ext3 \-O ^has_journal /dev/hdXX\fR"
 will create a filesystem that does not have a journal and hence will not
 be supported by the ext3 filesystem code in the Linux kernel.)
 .TP
 .BI \-T " usage-type[,...]"
 Specify how the filesystem is going to be used, so that
-.B mke2fs
+.B @MKFSPROG@
 can choose optimal filesystem parameters for that use.  The usage
 types that are supported are defined in the configuration file
 .BR /etc/mke2fs.conf (5).
@@ -619,15 +619,15 @@ The user may specify one or more usage types
 using a comma separated list.
 .sp
 If this option is is not specified,
-.B mke2fs
+.B @MKFSPROG@
 will pick a single default usage type based on the size of the filesystem to
 be created.  If the filesystem size is less than or equal to 3 megabytes,
-.B mke2fs
+.B @MKFSPROG@
 will use the filesystem type
 .IR floppy .
 If the filesystem size is greater than 3 but less than or equal to
 512 megabytes,
-.BR mke2fs (8)
+.BR @MKFSPROG@ (8)
 will use the filesystem type
 .IR small .
 If the filesystem size is greater than or equal to 4 terabytes but less than
@@ -640,7 +640,7 @@ If the filesystem size is greater than or equal to 16 terabytes,
 will use the filesystem type
 .IR huge .
 Otherwise,
-.BR mke2fs (8)
+.BR @MKFSPROG@ (8)
 will use the default filesystem type
 .IR default .
 .TP
@@ -652,7 +652,7 @@ Verbose execution.
 .TP
 .B \-V
 Print the version number of
-.B mke2fs
+.B @MKFSPROG@
 and exit.
 .SH ENVIRONMENT
 .TP
@@ -679,10 +679,10 @@ If set, do not show the message of filesystem automatic check caused by
 mount count or check interval.
 .SH AUTHOR
 This version of
-.B mke2fs
+.B @MKFSPROG@
 has been written by Theodore Ts'o <tytso@mit.edu>.
 .SH BUGS
-.B mke2fs
+.B @MKFSPROG@
 accepts the
 .B \-f
 option but currently ignores it because the second
@@ -690,12 +690,11 @@ extended file system does not support fragments yet.
 .br
 There may be other ones.  Please, report them to the author.
 .SH AVAILABILITY
-.B mke2fs
-is part of the e2fsprogs package and is available from
-http://e2fsprogs.sourceforge.net.
+.B @MKFSPROG@
+is part of the @E2FSPROGS@ package and is available from @E2FSPROGSURL@.
 .SH SEE ALSO
 .BR mke2fs.conf (5),
 .BR badblocks (8),
-.BR dumpe2fs (8),
-.BR e2fsck (8),
-.BR tune2fs (8)
+.BR @DUMPFSPROG@ (8),
+.BR @FSCKPROG@ (8),
+.BR @TUNEFSPROG@ (8)

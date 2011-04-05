@@ -54,21 +54,21 @@ static int open_e2fs (char *dev, int mode)
 	fd = open(dev, mode);
 	if (fd < 0) {
 	     perror(dev);
-	     fprintf (stderr, _("e2label: cannot open %s\n"), dev);
+	     fprintf (stderr, _("%s: cannot open %s\n"), LABELPROG, dev);
 	     exit(1);
 	}
 	if (lseek(fd, 1024, SEEK_SET) != 1024) {
 	     perror(dev);
-	     fprintf (stderr, _("e2label: cannot seek to superblock\n"));
+	     fprintf (stderr, _("%s: cannot seek to superblock\n"), LABELPROG);
 	     exit(1);
 	}
 	if (read(fd, (char *) &sb, sizeof(sb)) != sizeof(sb)) {
 	     perror(dev);
-	     fprintf (stderr, _("e2label: error reading superblock\n"));
+	     fprintf (stderr, _("%s: error reading superblock\n"), LABELPROG);
 	     exit(1);
 	}
 	if (sb.s_magic[0] + 256*sb.s_magic[1] != EXT2_SUPER_MAGIC) {
-	     fprintf (stderr, _("e2label: not an ext2 filesystem\n"));
+	     fprintf (stderr, _("%s: not an ext2 filesystem\n"), LABELPROG);
 	     exit(1);
 	}
 
@@ -96,12 +96,13 @@ static void change_label (char *dev, char *label)
 		fprintf(stderr, _("Warning: label too long, truncating.\n"));
 	if (lseek(fd, 1024, SEEK_SET) != 1024) {
 	     perror(dev);
-	     fprintf (stderr, _("e2label: cannot seek to superblock again\n"));
+	     fprintf (stderr, _("%s: cannot seek to superblock again\n"),
+				LABELPROG);
 	     exit(1);
 	}
 	if (write(fd, (char *) &sb, sizeof(sb)) != sizeof(sb)) {
 	     perror(dev);
-	     fprintf (stderr, _("e2label: error writing superblock\n"));
+	     fprintf (stderr, _("%s: error writing superblock\n"), LABELPROG);
 	     exit(1);
 	}
 }
@@ -113,7 +114,7 @@ int main (int argc, char ** argv)
 	else if (argc == 3)
 	     change_label(argv[1], argv[2]);
 	else {
-	     fprintf(stderr, _("Usage: e2label device [newlabel]\n"));
+	     fprintf(stderr, _("Usage: %s device [newlabel]\n"), LABELPROG);
 	     exit(1);
 	}
 	return 0;

@@ -11,8 +11,8 @@ INSTALL = @INSTALL@
 
 @MCONFIG@
 
-PROGS=		debugfs
-MANPAGES=	debugfs.8
+PROGS=		@DEBUGFSPROG@
+MANPAGES=	@DEBUGFSPROG@.8
 
 MK_CMDS=	_SS_DIR_OVERRIDE=../lib/ss ../lib/ss/mk_cmds
 
@@ -36,17 +36,17 @@ DEPLIBS= $(LIBEXT2FS) $(LIBE2P) $(DEPLIBSS) $(DEPLIBCOM_ERR) \
 
 all:: $(PROGS) $(MANPAGES)
 
-debugfs: $(DEBUG_OBJS) $(DEPLIBS)
+@DEBUGFSPROG@: $(DEBUG_OBJS) $(DEPLIBS)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o debugfs $(DEBUG_OBJS) $(LIBS)
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @DEBUGFSPROG@ $(DEBUG_OBJS) $(LIBS)
 
 debug_cmds.c debug_cmds.h: debug_cmds.ct
 	$(E) "	MK_CMDS $@"
 	$(Q) $(MK_CMDS) $(srcdir)/debug_cmds.ct
 
-debugfs.8: $(DEP_SUBSTITUTE) $(srcdir)/debugfs.8.in
+@DEBUGFSPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/debugfs.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/debugfs.8.in debugfs.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/debugfs.8.in @DEBUGFSPROG@.8
 
 installdirs:
 	$(E) "	MKINSTALLDIRS $(root_sbindir) $(man8dir)"
@@ -81,7 +81,7 @@ uninstall:
 	done
 
 clean:
-	$(RM) -f debugfs debugfs.8 \#* *.s *.o *.a *~ debug_cmds.c core
+	$(RM) -f $(PROGS) $(MANPAGES) \#* *.s *.o *.a *~ debug_cmds.c core
 
 mostlyclean: clean
 distclean: clean

@@ -11,10 +11,10 @@ INSTALL = @INSTALL@
 
 @MCONFIG@
 
-PROGS=		e2fsck
+PROGS=		@FSCKPROG@
 @LFSCK_CMT@USPROGS= lfsck
-MANPAGES=	e2fsck.8
-FMANPAGES=	e2fsck.conf.5
+MANPAGES=	@FSCKPROG@.8
+FMANPAGES=	@FSCKPROG@.conf.5
 @LFSCK_CMT@MANPAGES   += lfsck.8
 XTRA_CFLAGS=	-DRESOURCE_TRACK -I.
 
@@ -118,7 +118,7 @@ SRCS= $(srcdir)/e2fsck.c \
 @LFSCK_CMT@SRCS += $(srcdir)/lfsck_common.c
 
 @LFSCK_CMT@LFSCK_SRCS = $(srcdir)/lfsck_common.c $(srcdir)/lfsck.c
-all:: profiled $(PROGS) $(USPROGS) e2fsck $(MANPAGES) $(FMANPAGES)
+all:: profiled $(PROGS) $(USPROGS) @FSCKPROG@ $(MANPAGES) $(FMANPAGES)
 
 @PROFILE_CMT@all:: e2fsck.profiled
 
@@ -126,9 +126,9 @@ prof_err.c prof_err.h: prof_err.et
 	$(E) "	COMPILE_ET prof_err.et"
 	$(Q) $(COMPILE_ET) $(srcdir)/prof_err.et
 
-e2fsck: $(OBJS)  $(DEPLIBS)
+@FSCKPROG@: $(OBJS)  $(DEPLIBS)
 	$(E) "	LD $@"
-	$(Q) $(LD) $(ALL_LDFLAGS) -o e2fsck $(OBJS) $(LIBS) 
+	$(Q) $(LD) $(ALL_LDFLAGS) -o @FSCKPROG@ $(OBJS) $(LIBS)
 
 e2fsck.static: $(OBJS) $(STATIC_DEPLIBS)
 	$(E) "	LD $@"
@@ -204,20 +204,22 @@ profiled:
 lfsck.8: $(DEP_SUBSTITUTE) $(srcdir)/lfsck.8.in
 	$(SUBSTITUTE_UPTIME) $(srcdir)/lfsck.8.in lfsck.8
 
-e2fsck.8: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.8.in
+@FSCKPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.8.in e2fsck.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.8.in @FSCKPROG@.8
 
-e2fsck.conf.5: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.conf.5.in
+@FSCKPROG@.conf.5: $(DEP_SUBSTITUTE) $(srcdir)/e2fsck.conf.5.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.conf.5.in e2fsck.conf.5
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2fsck.conf.5.in @FSCKPROG@.conf.5
 
 installdirs:
 	$(E) "	MKINSTALLDIRS $(root_sbindir) $(sbindir) $(man8dir)"
 	$(Q) $(MKINSTALLDIRS) $(DESTDIR)$(root_sbindir) \
 		$(DESTDIR)$(man8dir) $(DESTDIR)$(man5dir) $(DESTDIR)$(sbindir)
 
-install: $(PROGS)  $(USPROGS) $(MANPAGES) $(FMANPAGES) installdirs
+install: install_@E2FSPROGS@
+
+install_common: $(PROGS)  $(USPROGS) $(MANPAGES) $(FMANPAGES) installdirs
 	$(Q) for i in $(PROGS); do \
 		echo "	INSTALL $(root_sbindir)/$$i"; \
 		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(root_sbindir)/$$i; \
@@ -225,11 +227,6 @@ install: $(PROGS)  $(USPROGS) $(MANPAGES) $(FMANPAGES) installdirs
 	@for i in $(USPROGS); do \
 		echo "  INSTALL $(sbindir)/$$i"; \
 		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(sbindir)/$$i; \
-	done
-	$(Q) for i in ext2 ext3 ext4 ext4dev; do \
-		echo "	LINK $(root_sbindir)/fsck.$$i"; \
-		(cd $(DESTDIR)$(root_sbindir); \
-			$(LN) $(LINK_INSTALL_FLAGS) e2fsck fsck.$$i); \
 	done
 	$(Q) for i in $(MANPAGES); do \
 		for j in $(COMPRESS_EXT); do \
@@ -244,6 +241,15 @@ install: $(PROGS)  $(USPROGS) $(MANPAGES) $(FMANPAGES) installdirs
 		done; \
 		echo "	INSTALL_DATA $(man5dir)/$$i"; \
 		$(INSTALL_DATA) $$i $(DESTDIR)$(man5dir)/$$i; \
+	done
+
+install_ldiskfsprogs: install_common
+
+install_e2fsprogs: install_common
+	$(Q) for i in ext2 ext3 ext4 ext4dev; do \
+		echo "	LINK $(root_sbindir)/fsck.$$i"; \
+		(cd $(DESTDIR)$(root_sbindir); \
+			$(LN) $(LINK_INSTALL_FLAGS) e2fsck fsck.$$i); \
 	done
 	$(Q) for i in ext2 ext3 ext4 ext4dev; do \
 		echo "	LINK $(man8dir)/fsck.$$i.8"; \
@@ -281,7 +287,7 @@ uninstall:
 
 clean:
 	$(RM) -f $(PROGS) $(USPROGS) \#* *\# *.s *.o *.a *~ core e2fsck.static \
-		e2fsck.shared e2fsck.profiled flushb e2fsck.8 \
+		e2fsck.shared e2fsck.profiled flushb $(MANPAGES) $(FMANPAGES) \
 		tst_problem tst_crc32 tst_region tst_refcount gen_crc32table \
 		crc32table.h e2fsck.conf.5 prof_err.c prof_err.h \
 		test_profile

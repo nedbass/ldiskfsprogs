@@ -155,8 +155,8 @@ void check_mount(const char *device, int force, const char *type)
 	if (mount_flags & EXT2_MF_MOUNTED) {
 		fprintf(stderr, _("%s is mounted; "), device);
 		if (force > 2) {
-			fputs(_("mke2fs forced anyway.  Hope /etc/mtab is "
-				"incorrect.\n"), stderr);
+			fprintf(stderr, _("%s forced anyway.  Hope /etc/mtab is "
+				"incorrect.\n"), MKFSPROG);
 			return;
 		}
 	abort_mke2fs:
@@ -167,7 +167,7 @@ void check_mount(const char *device, int force, const char *type)
 		fprintf(stderr, _("%s is apparently in use by the system; "),
 			device);
 		if (force > 2) {
-			fputs(_("mke2fs forced anyway.\n"), stderr);
+			fprintf(stderr, _("%s forced anyway.\n"), MKFSPROG);
 			return;
 		}
 		goto abort_mke2fs;
@@ -287,9 +287,9 @@ void print_check_message(ext2_filsys fs)
 	printf(_("This filesystem will be automatically "
 		 "checked every %d mounts or\n"
 		 "%g days, whichever comes first.  "
-		 "Use tune2fs -c or -i to override.\n"),
+		 "Use %s -c or -i to override.\n"),
 	       fs->super->s_max_mnt_count,
-	       (double)fs->super->s_checkinterval / (3600 * 24));
+	       (double)fs->super->s_checkinterval / (3600 * 24), TUNEFSPROG);
 }
 
 void dump_mmp_msg(struct mmp_struct *mmp, const char *msg)

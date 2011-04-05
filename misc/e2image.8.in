@@ -2,11 +2,11 @@
 .\" Copyright 2001 by Theodore Ts'o.  All Rights Reserved.
 .\" This file may be copied under the terms of the GNU Public License.
 .\" 
-.TH E2IMAGE 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.TH @IMAGEPROG@ 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "@E2FSPROGS@ version @E2FSPROGS_VERSION@"
 .SH NAME
-e2image \- Save critical ext2/ext3/ext4 filesystem metadata to a file
+@IMAGEPROG@ \- Save critical ext2/ext3/ext4 filesystem metadata to a file
 .SH SYNOPSIS
-.B e2image
+.B @IMAGEPROG@
 [
 .B \-rsI
 ]
@@ -14,13 +14,13 @@ e2image \- Save critical ext2/ext3/ext4 filesystem metadata to a file
 .I image-file
 .SH DESCRIPTION
 The
-.B e2image
+.B @IMAGEPROG@
 program will save critical ext2, ext3, or ext4 filesystem metadata located on 
 .I device  
 to a file specified by 
 .IR image-file .
 The image file may be examined by 
-.B dumpe2fs
+.B @DUMPFSPROG@
 and
 .BR  debugfs ,
 by using the
@@ -33,7 +33,7 @@ recover a badly damaged filesystem.
 If  
 .I image-file
 is \-, then the output of 
-.B e2image
+.B @IMAGEPROG@
 will be sent to standard output, so that the output can be piped to
 another program, such as 
 .BR gzip (1).  
@@ -43,7 +43,7 @@ creating a raw image file using the
 option, since the process of creating a normal image file currently
 requires random access to the file, which cannot be done using a
 pipe.  This restriction will hopefully be lifted in a future version of
-.BR e2image .)
+.BR @IMAGEPROG@ .)
 .PP
 It is a very good idea to create image files for all of
 filesystems on a system and save the partition
@@ -55,7 +55,7 @@ the filesystem whose data it contains, to ensure that this data is
 accessible in the case where the filesystem has been badly damaged.
 .PP
 To save disk space, 
-.B e2image
+.B @IMAGEPROG@
 creates the image file as a sparse file.  
 Hence, if the image file
 needs to be copied to another location, it should
@@ -77,7 +77,7 @@ disk will generally compress down to 3 or 4 megabytes.
 .PP
 The 
 .B \-I 
-option will cause e2image to install the metadata stored in the image
+option will cause @IMAGEPROG@ to install the metadata stored in the image
 file back to the device.    It can be used to restore the filesystem metadata
 back to the device in emergency situations.
 .PP
@@ -98,7 +98,7 @@ The
 option will create a raw image file instead of a normal image file.  
 A raw image file differs
 from a normal image file in two ways.  First, the filesystem metadata is
-placed in the proper position so that e2fsck, dumpe2fs, debugfs,
+placed in the proper position so that e2fsck, @DUMPFSPROG@, debugfs,
 etc. can be run directly on the raw image file.  In order to minimize
 the amount of disk space consumed by a raw image file, the file is
 created as a sparse file.  (Beware of copying or
@@ -113,7 +113,7 @@ as part of bug reports to e2fsprogs.  When used in this capacity, the
 recommended command is as follows (replace hda1 with the appropriate device):
 .PP
 .br
-\	\fBe2image \-r /dev/hda1 \- | bzip2 > hda1.e2i.bz2\fR
+\	\fB@IMAGEPROG@ \-r /dev/hda1 \- | bzip2 > hda1.e2i.bz2\fR
 .PP
 This will only send the metadata information, without any data blocks.  
 However, the filenames in the directory blocks can still reveal
@@ -121,7 +121,7 @@ information about the contents of the filesystem that the bug reporter
 may wish to keep confidential.  To address this concern, the
 .B \-s
 option can be specified.  This will cause
-.B e2image 
+.B @IMAGEPROG@
 to scramble directory entries and zero out any unused portions
 of the directory blocks before writing the image file.  However,
 the 
@@ -130,13 +130,12 @@ option will prevent analysis of problems related to hash-tree indexed
 directories.
 .PP
 .SH AUTHOR
-.B e2image 
+.B @IMAGEPROG@
 was written by Theodore Ts'o (tytso@mit.edu).
 .SH AVAILABILITY
-.B e2image
-is part of the e2fsprogs package and is available from 
-http://e2fsprogs.sourceforge.net.
+.B @IMAGEPROG@
+is part of the @E2FSPROGS@ package and is available from @E2FSPROGSURL@.
 .SH SEE ALSO
-.BR dumpe2fs (8),
-.BR debugfs (8)
+.BR @DUMPFSPROG@ (8),
+.BR @DEBUGFSPROG@ (8)
 

@@ -59,9 +59,15 @@ clean-doc:
 distclean-doc:
 	-test -d doc && cd doc && $(MAKE) distclean
 
-install: subs all-libs-recursive install-progs-recursive \
+install: install_@E2FSPROGS@
+
+install_e2fsprogs: install_common all-libs-recursive \
   install-shlibs-libs-recursive install-doc-libs
 	if test ! -d e2fsck && test ! -d debugfs && test ! -d e2scan && test ! -d misc && test ! -d ext2ed ; then $(MAKE) install-libs ; fi
+
+install_ldiskfsprogs: install_common
+
+install_common: subs install-progs-recursive
 
 install-strip: subs all-libs-recursive install-strip-progs-recursive \
   install-shlibs-strip-libs-recursive install-doc-libs

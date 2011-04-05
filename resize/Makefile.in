@@ -12,9 +12,9 @@ LDFLAG_STATIC = @LDFLAG_STATIC@
 
 @MCONFIG@
 
-PROGS=		resize2fs
+PROGS=		@RESIZEFSPROG@
 TEST_PROGS=	test_extent
-MANPAGES=	resize2fs.8
+MANPAGES=	@RESIZEFSPROG@.8
 
 RESIZE_OBJS= extent.o resize2fs.o main.o online.o sim_progress.o 
 
@@ -39,18 +39,18 @@ DEPSTATIC_LIBS= $(STATIC_LIBE2P) $(STATIC_LIBEXT2FS) $(DEPSTATIC_LIBCOM_ERR)
 
 all:: $(PROGS) $(TEST_PROGS) $(MANPAGES) 
 
-resize2fs: $(RESIZE_OBJS) $(DEPLIBS)
+@RESIZEFSPROG@: $(RESIZE_OBJS) $(DEPLIBS)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o resize2fs $(RESIZE_OBJS) $(LIBS) 
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @RESIZEFSPROG@ $(RESIZE_OBJS) $(LIBS)
 
 resize2fs.static: $(RESIZE_OBJS) $(DEPSTATIC_LIBS)
 	$(E) "	LD $@"
 	$(Q) $(LD) $(ALL_LDFLAGS) $(LDFLAG_STATIC) -o resize2fs.static \
 		$(RESIZE_OBJS) $(STATIC_LIBS) 
 
-resize2fs.8: $(DEP_SUBSTITUTE) $(srcdir)/resize2fs.8.in
+@RESIZEFSPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/resize2fs.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/resize2fs.8.in resize2fs.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/resize2fs.8.in @RESIZEFSPROG@.8
 
 test_extent: $(TEST_EXTENT_OBJS)
 	$(E) "	LD $@"

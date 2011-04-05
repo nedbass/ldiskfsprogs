@@ -2259,7 +2259,7 @@ int main(int argc, char **argv)
 	char		*data_filename = 0;
 
 	if (debug_prog_name == 0)
-		debug_prog_name = "debugfs";
+		debug_prog_name = DEBUGFSPROG;
 
 	add_error_table(&et_ext2_error_table);
 	fprintf (stderr, "%s %s (%s)\n", debug_prog_name,

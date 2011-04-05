@@ -44,7 +44,7 @@ extern int optind;
 
 #define in_use(m, x)	(ext2fs_test_bit ((x), (m)))
 
-const char * program_name = "dumpe2fs";
+const char * program_name = DUMPFSPROG;
 char * device_name = NULL;
 int hex_format = 0;
 
@@ -501,7 +501,7 @@ int main (int argc, char ** argv)
 	textdomain(NLS_CAT_NAME);
 #endif
 	add_error_table(&et_ext2_error_table);
-	fprintf (stderr, "dumpe2fs %s (%s)\n", E2FSPROGS_VERSION,
+	fprintf (stderr, "%s %s (%s)\n", DUMPFSPROG, E2FSPROGS_VERSION,
 		 E2FSPROGS_DATE);
 	if (argc && *argv)
 		program_name = *argv;

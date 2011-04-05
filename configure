@@ -649,6 +649,19 @@ root_libdir
 root_sbindir
 root_bindir
 root_prefix
+LDISKFSPROGS_CMT
+E2FSPROGS_CMT
+RESIZEFSPROG
+IMAGEPROG
+PFSCKPROG
+FSCKPROG
+DUMPFSPROG
+LABELPROG
+TUNEFSPROG
+DEBUGFSPROG
+MKFSPROGURL
+MKFSPROG
+E2FSPROGS
 UNIX_CMT
 CYGWIN_CMT
 LINUX_CMT
@@ -868,6 +881,7 @@ with_libiconv_prefix
 with_included_gettext
 with_libintl_prefix
 with_sqlite3
+with_ldiskfsprogs
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1546,6 +1560,7 @@ Optional Packages:
   --with-libintl-prefix[=DIR]  search for libintl in DIR/include and DIR/lib
   --without-libintl-prefix     don't search for libintl in includedir and libdir
   --with-sqlite3=DIR      location of sqlite3 library (default /usr/lib)
+  --with-ldiskfsprogs     use alternate names for ldiskfs-enabled e2fsprogs
 
 Some influential environment variables:
   CC          C compiler command
@@ -18366,6 +18381,121 @@ cygwin)
 	UNIX_CMT="#"
 	;;
 esac
+
+
+
+
+# Check whether --with-ldiskfsprogs was given.
+if test "${with_ldiskfsprogs+set}" = set; then
+  withval=$with_ldiskfsprogs;
+else
+  with_ldiskfsprogs='no'
+fi
+
+
+if test x"$with_ldiskfsprogs" = xyes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_LDISKFSPROGS 1
+_ACEOF
+
+        E2FSPROGS="ldiskfsprogs"
+        E2FSPROGSURL="http://e2fsprogs.sourceforge.net"
+        MKFSPROG="mkfs.ldiskfs"
+        DEBUGFSPROG="debugfs.ldiskfs"
+        TUNEFSPROG="tunefs.ldiskfs"
+        LABELPROG="label.ldiskfs"
+        DUMPFSPROG="dumpfs.ldiskfs"
+        FSCKPROG="fsck.ldiskfs"
+        PFSCKPROG="pfsck.ldiskfs"
+	IMAGEPROG="image.ldiskfs"
+	RESIZEFSPROG="resizefs.ldiskfs"
+	E2FSPROGS_CMT=#
+	LDISKFSPROGS_CMT=""
+        { $as_echo "$as_me:$LINENO: result: enabled" >&5
+$as_echo "enabled" >&6; }
+else
+        E2FSPROGS="e2fsprogs"
+        E2FSPROGSURL="http://downloads.lustre.org/public/tools/e2fsprogs"
+        MKFSPROG="mke2fs"
+        DEBUGFSPROG="debugfs"
+        TUNEFSPROG="tune2fs"
+        LABELPROG="e2label"
+        DUMPFSPROG="dumpe2fs"
+        FSCKPROG="e2fsck"
+        PFSCKPROG="fsck"
+	IMAGEPROG="e2image"
+	RESIZEFSPROG="resize2fs"
+	E2FSPROGS_CMT=""
+	LDISKFSPROGS_CMT=#
+        { $as_echo "$as_me:$LINENO: result: disabled" >&5
+$as_echo "disabled" >&6; }
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define E2FSPROGS "$E2FSPROGS"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define E2FSPROGSURL "$E2FSPROGSURL"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define MKFSPROG "$MKFSPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define DEBUGFSPROG "$DEBUGFSPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define TUNEFSPROG "$TUNEFSPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define LABELPROG "$LABELPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define DUMPFSPROG "$DUMPFSPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define FSCKPROG "$FSCKPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define PFSCKPROG "$PFSCKPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define IMAGEPROG "$IMAGEPROG"
+_ACEOF
+
+
+cat >>confdefs.h <<_ACEOF
+#define RESIZEFSPROG "$RESIZEFSPROG"
+_ACEOF
+
+
+
+
+
+
+
+
+
+
+
 
 
 
