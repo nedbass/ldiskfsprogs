@@ -1087,6 +1087,68 @@ AC_SUBST(LINUX_CMT)
 AC_SUBST(CYGWIN_CMT)
 AC_SUBST(UNIX_CMT)
 dnl
+dnl For lustre, e2fsprogs can be packaged as "ldiskfsprogs" to coexist
+dnl with distro's e2fsprogs.
+dnl
+AC_ARG_WITH([ldiskfsprogs],
+        AC_HELP_STRING([--with-ldiskfsprogs],
+                       [use alternate names for ldiskfs-enabled e2fsprogs]),
+        [],[with_ldiskfsprogs='no'])
+
+if test x"$with_ldiskfsprogs" = xyes; then
+        AC_DEFINE(HAVE_LDISKFSPROGS, 1, [enable use of ldiskfsprogs package])
+        E2FSPROGS="ldiskfsprogs"
+        E2FSPROGSURL="http://e2fsprogs.sourceforge.net"
+        MKFSPROG="mkfs.ldiskfs"
+        DEBUGFSPROG="debugfs.ldiskfs"
+        TUNEFSPROG="tunefs.ldiskfs"
+        LABELPROG="label.ldiskfs"
+        DUMPFSPROG="dumpfs.ldiskfs"
+        FSCKPROG="fsck.ldiskfs"
+        PFSCKPROG="pfsck.ldiskfs"
+	IMAGEPROG="image.ldiskfs"
+	RESIZEFSPROG="resizefs.ldiskfs"
+	LDISKFSPROGS_CMT=""
+        AC_MSG_RESULT([enabled])
+else
+        E2FSPROGS="e2fsprogs"
+        E2FSPROGSURL="http://downloads.lustre.org/public/tools/e2fsprogs"
+        MKFSPROG="mke2fs"
+        DEBUGFSPROG="debugfs"
+        TUNEFSPROG="tune2fs"
+        LABELPROG="e2label"
+        DUMPFSPROG="dumpe2fs"
+        FSCKPROG="e2fsck"
+        PFSCKPROG="fsck"
+	IMAGEPROG="e2image"
+	RESIZEFSPROG="resize2fs"
+	LDISKFSPROGS_CMT=#
+        AC_MSG_RESULT([disabled])
+fi
+AC_DEFINE_UNQUOTED(E2FSPROGS,    "$E2FSPROGS",   [name of e2fsprogs package])
+AC_DEFINE_UNQUOTED(E2FSPROGSURL, "$E2FSPROGSURL",[url for e2fsprogs package])
+AC_DEFINE_UNQUOTED(MKFSPROG,     "$MKFSPROG",    [name of mkfs program])
+AC_DEFINE_UNQUOTED(DEBUGFSPROG,  "$DEBUGFSPROG", [name of debugfs program])
+AC_DEFINE_UNQUOTED(TUNEFSPROG,   "$TUNEFSPROG",  [name of tunefs program])
+AC_DEFINE_UNQUOTED(LABELPROG,    "$LABELPROG",   [name of label program])
+AC_DEFINE_UNQUOTED(DUMPFSPROG,   "$DUMPFSPROG",  [name of dumpfs program])
+AC_DEFINE_UNQUOTED(FSCKPROG,     "$FSCKPROG",    [name of fsck program])
+AC_DEFINE_UNQUOTED(PFSCKPROG,    "$PFSCKPROG",   [name of pfsck program])
+AC_DEFINE_UNQUOTED(IMAGEPROG,    "$IMAGEPROG",   [name of image program])
+AC_DEFINE_UNQUOTED(RESIZEFSPROG, "$RESIZEFSPROG",[name of resizefs program])
+AC_SUBST(E2FSPROGS)
+AC_SUBST(MKFSPROG)
+AC_SUBST(MKFSPROGURL)
+AC_SUBST(DEBUGFSPROG)
+AC_SUBST(TUNEFSPROG)
+AC_SUBST(LABELPROG)
+AC_SUBST(DUMPFSPROG)
+AC_SUBST(FSCKPROG)
+AC_SUBST(PFSCKPROG)
+AC_SUBST(IMAGEPROG)
+AC_SUBST(RESIZEFSPROG)
+AC_SUBST(LDISKFSPROGS_CMT)
+dnl
 dnl Linux and Hurd places root files in the / by default
 dnl
 case "$host_os" in

@@ -13,7 +13,7 @@ INSTALL = @INSTALL@
 
 all:: @DO_TEST_SUITE@
 
-test_script: test_script.in Makefile mke2fs.conf
+test_script: test_script.in Makefile mke2fs.conf create_links
 	@echo "Creating test_script..."
 	@echo "#!/bin/sh" > test_script
 @HTREE_CMT@	@echo "HTREE=y" >> test_script
@@ -25,6 +25,31 @@ test_script: test_script.in Makefile mke2fs.conf
 
 mke2fs.conf: $(srcdir)/mke2fs.conf.in
 	$(CP) $(srcdir)/mke2fs.conf.in mke2fs.conf
+
+create_links:
+	test "@DEBUGFSPROG@" == "debugfs" || test -x ../debugfs/debugfs \
+		|| $(LN_S) @DEBUGFSPROG@ ../debugfs/debugfs
+	test "@FSCKPROG@" == "e2fsck" || test -x ../e2fsck/e2fsck \
+		|| $(LN_S) @FSCKPROG@ ../e2fsck/e2fsck
+	test "@RESIZEFSPROG@" == "resize2fs" || test -x ../resize/resize2fs \
+		|| $(LN_S) @RESIZEFSPROG@ ../resize/resize2fs
+	test "@TUNEFSPROG@" == "tune2fs" || test -x ../misc/tune2fs \
+		|| $(LN_S) @TUNEFSPROG@ ../misc/tune2fs
+	test "@IMAGEPROG@" == "e2image" || test -x ../misc/e2image \
+		|| $(LN_S) @IMAGEPROG@ ../misc/e2image
+	test "@DUMPFSPROG@" == "dumpe2fs" || test -x ../misc/dumpe2fs \
+		|| $(LN_S) @DUMPFSPROG@ ../misc/dumpe2fs
+	test "@MKFSPROG@" == "mke2fs" || test -x ../misc/mke2fs \
+		|| $(LN_S) @MKFSPROG@ ../misc/mke2fs
+
+remove_links:
+	test "@DEBUGFSPROG@" == "debugfs" || $(RM) -f ../debugfs/debugfs
+	test "@FSCKPROG@" == "e2fsck" || $(RM) -f ../e2fsck/e2fsck
+	test "@RESIZEFSPROG@" == "resize2fs" || $(RM) -f ../resize/resize2fs
+	test "@TUNEFSPROG@" == "tune2fs" || $(RM) -f ../misc/tune2fs
+	test "@IMAGEPROG@" == "e2image" || $(RM) -f ../misc/e2image
+	test "@DUMPFSPROG@" == "dumpe2fs" || $(RM) -f ../misc/dumpe2fs
+	test "@MKFSPROG@" == "mke2fs" || $(RM) -f ../misc/mke2fs
 
 check:: test_script
 	@echo "Removing remnants of earlier tests..."
@@ -67,7 +92,7 @@ testend: test_script ${TDIR}/image
 	@echo; echo "Hopefully e2fsck now fixes this problem properly."
 	@echo "If all is well, edit ${TDIR}/name and rename ${TDIR}."
 
-clean::
+clean:: remove_links
 	$(RM) -f *~ *.log *.new *.failed *.ok test.img* test_script mke2fs.conf
 
 distclean:: clean

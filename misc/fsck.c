@@ -455,6 +455,7 @@ static int execute(const char *type, const char *device, const char *mntpt,
 		if ((strcmp(type, "ext2") == 0) ||
 		    (strcmp(type, "ext3") == 0) ||
 		    (strcmp(type, "ext4") == 0) ||
+		    (strcmp(type, "ldiskfs") == 0) ||
 		    (strcmp(type, "ext4dev") == 0)) {
 			char tmp[80];
 
@@ -474,7 +475,7 @@ static int execute(const char *type, const char *device, const char *mntpt,
 
 	s = find_fsck(prog);
 	if (s == NULL) {
-		fprintf(stderr, _("fsck: %s: not found\n"), prog);
+		fprintf(stderr, _("%s: %s: not found\n"), progname, prog);
 		free(inst);
 		return ENOENT;
 	}
@@ -632,6 +633,7 @@ static struct fsck_instance *wait_one(int flags)
 			if (strcmp(inst2->type, "ext2") &&
 			    strcmp(inst2->type, "ext3") &&
 			    strcmp(inst2->type, "ext4") &&
+			    strcmp(inst2->type, "ldiskfs") &&
 			    strcmp(inst2->type, "ext4dev"))
 				continue;
 			/*
@@ -907,8 +909,8 @@ static int ignore(struct fs_info *fs)
 	/* See if the <fsck.fs> program is available. */
 	if (find_fsck(fs->type) == NULL) {
 		if (wanted)
-			fprintf(stderr, _("fsck: cannot check %s: fsck.%s not found\n"),
-				fs->device, fs->type);
+			fprintf(stderr, _("%s: cannot check %s: fsck.%s not found\n"),
+				progname, fs->device, fs->type);
 		return 1;
 	}
 
@@ -1074,7 +1076,7 @@ static int check_all(NOARGS)
 
 static void usage(NOARGS)
 {
-	fputs(_("Usage: fsck [-AmMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
+	fputs(_("Usage: " PFSCKPROG " [-AmMNPRTV] [ -C [ fd ] ] [-t fstype] [fs-options] [filesys ...]\n"), stderr);
 	exit(EXIT_USAGE);
 }
 
@@ -1315,8 +1317,9 @@ int main(int argc, char *argv[])
 		}
 		fs = lookup(devices[i]);
 		if (!fs) {
-			fs = create_fs_device(devices[i], 0, "auto",
-					      0, -1, -1);
+			fs = create_fs_device(devices[i], 0,
+				!strcmp(PFSCKPROG, "pfsck.ldiskfs") ?
+				"ldiskfs" : "auto", 0, -1, -1);
 			if (!fs)
 				continue;
 		}

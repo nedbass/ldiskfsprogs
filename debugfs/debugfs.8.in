@@ -2,11 +2,11 @@
 .\" Copyright 1993, 1994, 1995 by Theodore Ts'o.  All Rights Reserved.
 .\" This file may be copied under the terms of the GNU Public License.
 .\" 
-.TH DEBUGFS 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.TH @DEBUGFSPROG@ 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "@E2FSPROGS@ version @E2FSPROGS_VERSION@"
 .SH NAME
-debugfs \- ext2/ext3/ext4 file system debugger
+@DEBUGFSPROG@ \- ext2/ext3/ext4 file system debugger
 .SH SYNOPSIS
-.B debugfs
+.B @DEBUGFSPROG@
 [
 .B \-DVwci
 ]
@@ -35,7 +35,7 @@ device
 ]
 .SH DESCRIPTION
 The 
-.B debugfs 
+.B @DEBUGFSPROG@
 program is an interactive file system debugger. It can be used to
 examine and change the state of an ext2, ext3, or ext4 file system.
 .br
@@ -62,11 +62,11 @@ represents an ext2 image file created by the
 program.  Since the ext2 image file only contains the superblock, block
 group descriptor, block and inode allocation bitmaps, and 
 the inode table, many
-.B debugfs
+.B @DEBUGFSPROG@
 commands will not function properly.  
 .B Warning:
 no safety checks are in place, and 
-.B debugfs 
+.B @DEBUGFSPROG@
 may fail in interesting ways if commands such as
 .IR ls ", " dump ", " 
 etc. are tried without specifying the 
@@ -74,7 +74,7 @@ etc. are tried without specifying the
 using the 
 .I \-d
 option.
-.B debugfs 
+.B @DEBUGFSPROG@
 is a debugging tool.  It has rough edges!
 .TP
 .I -d data_source_device
@@ -100,39 +100,39 @@ option.
 .TP
 .I -f cmd_file
 Causes 
-.B debugfs
+.B @DEBUGFSPROG@
 to read in commands from 
 .IR cmd_file , 
 and execute them.  When 
-.B debugfs
+.B @DEBUGFSPROG@
 is finished executing those commands, it will exit.
 .TP
 .I -D
 Causes
-.B debugfs
+.B @DEBUGFSPROG@
 to open the device using Direct I/O, bypassing the buffer cache.  Note
 that some Linux devices, notably device mapper as of this writing, do
 not support Direct I/O.
 .TP
 .I -R request
 Causes 
-.B debugfs
+.B @DEBUGFSPROG@
 to execute the single command 
 .IR request ,
 and then exit.
 .TP
 .I -V
 print the version number of 
-.B debugfs
+.B @DEBUGFSPROG@
 and exit.
 .SH SPECIFYING FILES
 Many
-.B debugfs
+.B @DEBUGFSPROG@
 commands take a
 .I filespec
 as an argument to specify an inode (as opposed to a pathname) 
 in the filesystem which is currently opened by 
-.BR debugfs . 
+.BR @DEBUGFSPROG@ . 
 The
 .I filespec
 argument may be specified in two forms.  The first form is an inode 
@@ -141,12 +141,12 @@ number surrounded by angle brackets, e.g.,
 The second form is a pathname; if the pathname is prefixed by a forward slash
 ('/'), then it is interpreted relative to the root of the filesystem 
 which is currently opened by 
-.BR debugfs .
+.BR @DEBUGFSPROG@ .
 If not, the pathname is 
 interpreted relative to the current working directory as maintained by 
-.BR debugfs .  
+.BR @DEBUGFSPROG@ .
 This may be modified by using the 
-.B debugfs
+.B @DEBUGFSPROG@
 command
 .IR cd .
 .\" 
@@ -154,7 +154,7 @@ command
 .\"
 .SH COMMANDS
 This is a list of the commands which 
-.B debugfs
+.B @DEBUGFSPROG@
 supports.
 .TP
 .I bmap filespec logical_block
@@ -278,7 +278,7 @@ Free the inode specified by
 .TP
 .I help
 Print a list of commands understood by 
-.BR debugfs .
+.BR @DEBUGFSPROG@ .
 .TP
 .I icheck block ...
 Print a listing of the inodes which use the one or more blocks specified
@@ -296,7 +296,7 @@ with device size
 .IR blocksize .
 Note that this does not fully initialize all of the data structures; 
 to do this, use the 
-.BR mke2fs (8)
+.BR @MKFSPROG@ (8)
 program.  This is just a call to the low-level library, which sets up
 the superblock and block descriptors.
 .TP
@@ -310,7 +310,7 @@ command if you wish to unlink a file.
 .TP
 .I lcd directory
 Change the current working directory of the
-.B debugfs
+.B @DEBUGFSPROG@
 process to
 .I directory
 on the native filesystem.
@@ -397,14 +397,14 @@ prevent the filesystem from being opened.  The
 flag causes the filesystem to be opened in exclusive mode.  The
 .IR -b ", " -c ", " -i ", " -s ", " -w ", and " -D
 options behave the same as the command-line options to 
-.BR debugfs .
+.BR @DEBUGFSPROG@ .
 .TP
 .I pwd
 Print the current working directory.
 .TP
 .I quit
 Quit
-.B debugfs
+.B @DEBUGFSPROG@
 .TP
 .I rdump directory destination
 Recursively dump
@@ -512,7 +512,7 @@ the inode to a directory may require the directory to be expanded, which
 could allocate a block that had been used by one of the
 yet-to-be-undeleted files.  So it is safer to undelete all of the 
 inodes without specifying a destination pathname, and then in a separate
-pass, use the debugfs
+pass, use the @DEBUGFSPROG@
 .B link
 command to link the inode to the destination pathname, or use 
 .B e2fsck
@@ -534,7 +534,7 @@ into the destination file.
 .TP
 .B DEBUGFS_PAGER, PAGER
 The
-.B debugfs
+.B @DEBUGFSPROG@
 program always pipes the output of the some commands through a
 pager program.  These commands include: 
 .IR show_super_stats ,
@@ -561,10 +561,10 @@ environment variable is available to override the more general
 .B PAGER
 environment variable.
 .SH AUTHOR
-.B debugfs
+.B @DEBUGFSPROG@
 was written by Theodore Ts'o <tytso@mit.edu>.
 .SH SEE ALSO
-.BR dumpe2fs (8),
-.BR tune2fs (8),
-.BR e2fsck (8),
-.BR mke2fs (8)
+.BR @DUMPFSPROG@ (8),
+.BR @TUNEFSPROG@ (8),
+.BR @FSCKPROG@ (8),
+.BR @MKFSPROG@ (8)

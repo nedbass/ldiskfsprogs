@@ -781,7 +781,7 @@ static void syntax_err_report(const char *filename, long err, int line_num)
 	exit(FSCK_ERROR);
 }
 
-static const char *config_fn[] = { ROOT_SYSCONFDIR "/e2fsck.conf", 0 };
+static const char *config_fn[] = { ROOT_SYSCONFDIR "/" FSCKPROG ".conf", 0 };
 
 static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 {
@@ -825,7 +825,7 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 	if (argc && *argv)
 		ctx->program_name = *argv;
 	else
-		ctx->program_name = "e2fsck";
+		ctx->program_name = FSCKPROG;
 
 	if ((cp = getenv("E2FSCK_CONFIG")) != NULL)
 		config_fn[0] = cp;
@@ -959,8 +959,8 @@ static errcode_t PRS(int argc, char *argv[], e2fsck_t *ret_ctx)
 			else
 				ctx->options |= E2F_OPT_TIME;
 #else
-			fprintf(stderr, _("The -t option is not "
-				"supported on this version of e2fsck.\n"));
+			fprintf(stderr, _("The -t option is not supported "
+				"on this version of %s.\n"), FSCKPROG);
 #endif
 			break;
 		case 'c':
@@ -1244,9 +1244,9 @@ check_error:
 		dump_mmp_msg(fs->mmp_buf, NULL);
 	} else if (retval == EXT2_ET_MMP_FSCK_ON) {
 		dump_mmp_msg(fs->mmp_buf,
-			     _("If you are sure that e2fsck "
-			       "is not running on any node then use "
-			       "'tune2fs -f -E clear_mmp {device}'\n"));
+				_("If you are sure that " FSCKPROG " is not "
+				"running on any node then use '" TUNEFSPROG
+				" -f -E clear_mmp {device}'\n"));
 	} else if (retval == EXT2_ET_MMP_MAGIC_INVALID) {
 		if (fix_problem(ctx, PR_0_MMP_INVALID_MAGIC, &pctx))
 			ext2fs_mmp_clear(fs);
@@ -1295,7 +1295,7 @@ int main (int argc, char *argv[])
 
 	retval = PRS(argc, argv, &ctx);
 	if (retval) {
-		com_err("e2fsck", retval,
+		com_err(FSCKPROG, retval,
 			_("while trying to initialize program"));
 		exit(FSCK_ERROR);
 	}
@@ -1303,7 +1303,7 @@ int main (int argc, char *argv[])
 
 	init_resource_track(&ctx->global_rtrack, NULL);
 	if (!(ctx->options & E2F_OPT_PREEN) || show_version_only)
-		fprintf(stderr, "e2fsck %s (%s)\n", my_ver_string,
+		fprintf(stderr, "%s %s (%s)\n", FSCKPROG, my_ver_string,
 			 my_ver_date);
 
 	if (show_version_only) {
@@ -1398,9 +1398,9 @@ failure:
 			ctx->filesystem_name);
 		if (retval == EXT2_ET_REV_TOO_HIGH) {
 			printf(_("The filesystem revision is apparently "
-			       "too high for this version of e2fsck.\n"
+			       "too high for this version of %s.\n"
 			       "(Or the filesystem superblock "
-			       "is corrupt)\n\n"));
+			       "is corrupt)\n\n"), FSCKPROG);
 			fix_problem(ctx, PR_0_SB_CORRUPT, &pctx);
 		} else if (retval == EXT2_ET_SHORT_READ)
 			printf(_("Could this be a zero-length partition?\n"));
@@ -1482,7 +1482,7 @@ failure:
 			_("while trying to open %s"),
 			ctx->filesystem_name);
 	get_newer:
-		fatal_error(ctx, _("Get a newer version of e2fsck!"));
+		fatal_error(ctx, _("Get a newer version of " FSCKPROG "!"));
 	}
 
 	/*
@@ -1603,9 +1603,9 @@ print_unsupp_features:
 #ifndef ENABLE_HTREE
 	if (sb->s_feature_compat & EXT2_FEATURE_COMPAT_DIR_INDEX) {
 		com_err(ctx->program_name, 0,
-			_("E2fsck not compiled with HTREE support,\n\t"
+			_("%s not compiled with HTREE support,\n\t"
 			  "but filesystem %s has HTREE directories.\n"),
-			ctx->device_name);
+			FSCKPROG, ctx->device_name);
 		goto get_newer;
 	}
 #endif
@@ -1765,8 +1765,8 @@ no_journal:
 		goto restart;
 	}
 	if (run_result & E2F_FLAG_CANCEL) {
-		printf(_("%s: e2fsck canceled.\n"), ctx->device_name ?
-		       ctx->device_name : ctx->filesystem_name);
+		printf(_("%s: %s canceled.\n"), ctx->device_name ?
+		       ctx->device_name : ctx->filesystem_name, FSCKPROG);
 		exit_value |= FSCK_CANCELED;
 	}
 	if (run_result & E2F_FLAG_ABORT)

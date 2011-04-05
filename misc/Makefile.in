@@ -11,8 +11,8 @@ INSTALL = @INSTALL@
 
 @MCONFIG@
 
-@IMAGER_CMT@E2IMAGE_PROG= e2image
-@IMAGER_CMT@E2IMAGE_MAN= e2image.8
+@IMAGER_CMT@E2IMAGE_PROG= @IMAGEPROG@
+@IMAGER_CMT@E2IMAGE_MAN= @IMAGEPROG@.8
 
 @UUIDD_CMT@UUIDD_PROG= uuidd
 @UUIDD_CMT@UUIDD_MAN= uuidd.8
@@ -23,13 +23,20 @@ INSTALL = @INSTALL@
 @BLKID_CMT@FINDFS_LINK= findfs
 @BLKID_CMT@FINDFS_MAN= findfs.8
 
-SPROGS=		mke2fs badblocks tune2fs dumpe2fs $(BLKID_PROG) logsave \
-			$(E2IMAGE_PROG) @FSCK_PROG@ e2undo
+SPROGS_COMMON=	@MKFSPROG@ @TUNEFSPROG@ @DUMPFSPROG@ $(E2IMAGE_PROG) \
+		@PFSCKPROG@
+SPROGS_E2FSPROGS= \
+		badblocks $(BLKID_PROG) logsave e2undo
+SPROGS=		$(SPROGS_COMMON) $(SPROGS_E2FSPROGS)
 USPROGS=	mklost+found filefrag e2freefrag $(UUIDD_PROG)
-SMANPAGES=	tune2fs.8 mklost+found.8 mke2fs.8 dumpe2fs.8 badblocks.8 \
-			e2label.8 $(FINDFS_MAN) $(BLKID_MAN) $(E2IMAGE_MAN) \
-			logsave.8 filefrag.8 e2freefrag.8 e2undo.8 $(UUIDD_MAN) @FSCK_MAN@
-FMANPAGES=	mke2fs.conf.5
+SMANPAGES_COMMON= \
+		@TUNEFSPROG@.8 @MKFSPROG@.8 @DUMPFSPROG@.8 @LABELPROG@.8 \
+		$(E2IMAGE_MAN) @PFSCKPROG@.8
+SMANPAGES_E2FSPROGS= \
+		mklost+found.8 badblocks.8 $(FINDFS_MAN) $(BLKID_MAN) \
+		logsave.8 filefrag.8 e2freefrag.8 e2undo.8 $(UUIDD_MAN)
+SMANPAGES=	$(SMANPAGES_COMMON) $(SMANPAGES_E2FSPROGS)
+FMANPAGES=	@MKFSPROG@.conf.5
 
 UPROGS=		chattr lsattr @UUID_CMT@ uuidgen
 UMANPAGES=	chattr.1 lsattr.1 @UUID_CMT@ uuidgen.1
@@ -137,10 +144,10 @@ e2initrd_helper: e2initrd_helper.o $(DEPLIBS) $(DEPLIBBLKID) $(LIBEXT2FS)
 	$(Q) $(CC) $(ALL_LDFLAGS) -o e2initrd_helper e2initrd_helper.o $(LIBS) \
 		$(LIBBLKID) $(LIBEXT2FS) $(LIBINTL)
 
-tune2fs: $(TUNE2FS_OBJS) $(DEPLIBS) $(DEPLIBS_E2P) $(DEPLIBBLKID) \
+@TUNEFSPROG@: $(TUNE2FS_OBJS) $(DEPLIBS) $(DEPLIBS_E2P) $(DEPLIBBLKID) \
 		$(DEPLIBUUID) $(LIBEXT2FS) 
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o tune2fs $(TUNE2FS_OBJS) $(LIBS) \
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @TUNEFSPROG@ $(TUNE2FS_OBJS) $(LIBS) \
 		$(LIBBLKID) $(LIBUUID) $(LIBEXT2FS) $(LIBS_E2P) $(LIBINTL)
 
 tune2fs.static: $(TUNE2FS_OBJS) $(STATIC_DEPLIBS) $(STATIC_LIBE2P) $(DEPSTATIC_LIBBLKID)
@@ -173,9 +180,9 @@ blkid.profiled: $(PROFILED_BLKID_OBJS) $(DEPPROFILED_LIBBLKID) \
 	$(Q) $(CC) $(ALL_LDFLAGS) -g -pg -o blkid.profiled $(PROFILED_BLKID_OBJS) \
 		$(PROFILED_LIBBLKID) $(LIBINTL) $(PROFILED_LIBEXT2FS)
 
-e2image: $(E2IMAGE_OBJS) $(DEPLIBS)
+@IMAGEPROG@: $(E2IMAGE_OBJS) $(DEPLIBS)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o e2image $(E2IMAGE_OBJS) $(LIBS) $(LIBINTL)
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @IMAGEPROG@ $(E2IMAGE_OBJS) $(LIBS) $(LIBINTL)
 
 e2image.profiled: $(PROFILED_E2IMAGE_OBJS) $(PROFILED_DEPLIBS)
 	$(E) "	LD $@"
@@ -204,10 +211,10 @@ mklost+found: $(MKLPF_OBJS)
 	$(E) "	LD $@"
 	$(Q) $(CC) $(ALL_LDFLAGS) -o mklost+found $(MKLPF_OBJS) $(LIBINTL)
 
-mke2fs: $(MKE2FS_OBJS) $(DEPLIBS) $(LIBE2P) $(DEPLIBBLKID) $(DEPLIBUUID) \
+@MKFSPROG@: $(MKE2FS_OBJS) $(DEPLIBS) $(LIBE2P) $(DEPLIBBLKID) $(DEPLIBUUID) \
 		$(LIBEXT2FS) 
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o mke2fs $(MKE2FS_OBJS) $(LIBS) $(LIBBLKID) \
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @MKFSPROG@ $(MKE2FS_OBJS) $(LIBS) $(LIBBLKID) \
 		$(LIBUUID) $(LIBEXT2FS) $(LIBE2P) $(LIBINTL)
 
 mke2fs.static: $(MKE2FS_OBJS) $(STATIC_DEPLIBS) $(STATIC_LIBE2P) $(DEPSTATIC_LIBUUID) $(DEPSTATIC_LIBBLKID)
@@ -250,9 +257,9 @@ uuidd.profiled: $(PROFILED_UUIDD_OBJS) $(PROFILED_DEPLIBUUID)
 	$(Q) $(CC) $(ALL_LDFLAGS) -g -pg -o uuidd.profiled $(PROFILED_UUIDD_OBJS) \
 		$(PROFILED_LIBUUID) $(LIBINTL)
 
-dumpe2fs: $(DUMPE2FS_OBJS) $(DEPLIBS) $(DEPLIBS_E2P) $(DEPLIBUUID)
+@DUMPFSPROG@: $(DUMPE2FS_OBJS) $(DEPLIBS) $(DEPLIBS_E2P) $(DEPLIBUUID)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o dumpe2fs $(DUMPE2FS_OBJS) $(LIBS) \
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @DUMPFSPROG@ $(DUMPE2FS_OBJS) $(LIBS) \
 		$(LIBS_E2P) $(LIBUUID) $(LIBINTL)
 
 dumpe2fs.profiled: $(PROFILED_DUMPE2FS_OBJS) $(PROFILED_DEPLIBS) \
@@ -262,14 +269,14 @@ dumpe2fs.profiled: $(PROFILED_DUMPE2FS_OBJS) $(PROFILED_DEPLIBS) \
 		$(PROFILED_DUMPE2FS_OBJS) $(PROFILED_LIBS) \
 		$(PROFILED_LIBE2P) $(PROFILED_LIBUUID) $(LIBINTL)
 
-fsck: $(FSCK_OBJS) $(DEPLIBBLKID)
+@PFSCKPROG@: $(FSCK_OBJS) $(DEPLIBBLKID)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -o fsck $(FSCK_OBJS) $(LIBBLKID) $(LIBINTL)
+	$(Q) $(CC) $(ALL_LDFLAGS) -o @PFSCKPROG@ $(FSCK_OBJS) $(LIBBLKID) $(LIBINTL)
 
 fsck.profiled: $(PROFILED_FSCK_OBJS) $(PROFILED_DEPLIBBLKID)
 	$(E) "	LD $@"
-	$(Q) $(CC) $(ALL_LDFLAGS) -g -pg -o fsck.profiled $(PROFILED_FSCK_OBJS) \
-		$(PROFILED_LIBBLKID) $(LIBINTL)
+	$(Q) $(CC) $(ALL_LDFLAGS) -g -pg -o fsck.profiled \
+		$(PROFILED_FSCK_OBJS) $(PROFILED_LIBBLKID) $(LIBINTL)
 
 badblocks: $(BADBLOCKS_OBJS) $(DEPLIBS)
 	$(E) "	LD $@"
@@ -306,25 +313,25 @@ tst_ismounted: $(srcdir)/ismounted.c $(STATIC_LIBEXT2FS) $(DEPLIBCOM_ERR)
 	$(CC) -o tst_ismounted $(srcdir)/ismounted.c -DDEBUG $(ALL_CFLAGS) \
 		$(LIBCOM_ERR)
 
-tune2fs.8: $(DEP_SUBSTITUTE) $(srcdir)/tune2fs.8.in
+@TUNEFSPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/tune2fs.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/tune2fs.8.in tune2fs.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/tune2fs.8.in @TUNEFSPROG@.8
 
 mklost+found.8: $(DEP_SUBSTITUTE) $(srcdir)/mklost+found.8.in
 	$(E) "	SUBST $@"
 	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/mklost+found.8.in mklost+found.8
 
-mke2fs.8: $(DEP_SUBSTITUTE) $(srcdir)/mke2fs.8.in
+@MKFSPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/mke2fs.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/mke2fs.8.in mke2fs.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/mke2fs.8.in @MKFSPROG@.8
 
-mke2fs.conf.5: $(DEP_SUBSTITUTE) $(srcdir)/mke2fs.conf.5.in
+@MKFSPROG@.conf.5: $(DEP_SUBSTITUTE) $(srcdir)/mke2fs.conf.5.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/mke2fs.conf.5.in mke2fs.conf.5
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/mke2fs.conf.5.in @MKFSPROG@.conf.5
 
-e2label.8: $(DEP_SUBSTITUTE) $(srcdir)/e2label.8.in
+@LABELPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/e2label.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2label.8.in e2label.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2label.8.in @LABELPROG@.8
 
 e2undo.8: $(DEP_SUBSTITUTE) $(srcdir)/e2undo.8.in
 	$(E) "	SUBST $@"
@@ -334,21 +341,21 @@ findfs.8: $(DEP_SUBSTITUTE) $(srcdir)/findfs.8.in
 	$(E) "	SUBST $@"
 	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/findfs.8.in findfs.8
 
-e2image.8: $(DEP_SUBSTITUTE) $(srcdir)/e2image.8.in
+@IMAGEPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/e2image.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2image.8.in e2image.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/e2image.8.in @IMAGEPROG@.8
 
-dumpe2fs.8: $(DEP_SUBSTITUTE) $(srcdir)/dumpe2fs.8.in 
+@DUMPFSPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/dumpe2fs.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/dumpe2fs.8.in dumpe2fs.8
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/dumpe2fs.8.in @DUMPFSPROG@.8
 
 badblocks.8: $(DEP_SUBSTITUTE) $(srcdir)/badblocks.8.in
 	$(E) "	SUBST $@"
 	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/badblocks.8.in badblocks.8	
 
-fsck.8: $(DEP_SUBSTITUTE) $(srcdir)/fsck.8.in
+@PFSCKPROG@.8: $(DEP_SUBSTITUTE) $(srcdir)/fsck.8.in
 	$(E) "	SUBST $@"
-	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/fsck.8.in fsck.8 
+	$(Q) $(SUBSTITUTE_UPTIME) $(srcdir)/fsck.8.in @PFSCKPROG@.8
 
 blkid.8: $(DEP_SUBSTITUTE) $(srcdir)/blkid.8.in
 	$(E) "	SUBST $@"
@@ -394,8 +401,64 @@ installdirs:
 		$(DESTDIR)$(man1dir) $(DESTDIR)$(man5dir) \
 		$(DESTDIR)$(libdir) $(DESTDIR)/$(root_sysconfdir)
 
-install: all $(SMANPAGES) $(UMANPAGES) installdirs
-	$(Q) for i in $(SPROGS); do \
+
+install: install_@E2FSPROGS@
+
+install_common: all $(SMANPAGES) $(UMANPAGES) installdirs
+	$(Q) for i in $(SPROGS_COMMON); do \
+		echo "	INSTALL $(root_sbindir)/$$i"; \
+		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(root_sbindir)/$$i; \
+	done
+	$(E) "	LINK $(root_sbindir)/@LABELPROG@"
+	$(Q) $(LN) -f $(DESTDIR)$(root_sbindir)/@TUNEFSPROG@ \
+		$(DESTDIR)$(root_sbindir)/@LABELPROG@
+	$(Q) for i in $(SMANPAGES_COMMON); do \
+		for j in $(COMPRESS_EXT); do \
+			$(RM) -f $(DESTDIR)$(man8dir)/$$i.$$j; \
+		done; \
+		echo "	INSTALL_DATA $(man8dir)/$$i"; \
+		$(INSTALL_DATA) $$i $(DESTDIR)$(man8dir)/$$i; \
+	done
+	$(Q) for i in $(FMANPAGES); do \
+		for j in $(COMPRESS_EXT); do \
+			$(RM) -f $(DESTDIR)$(man5dir)/$$i.$$j; \
+		done; \
+		echo "	INSTALL_DATA $(man5dir)/$$i"; \
+		$(INSTALL_DATA) $$i $(DESTDIR)$(man5dir)/$$i; \
+	done
+	$(Q) if test -f $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf; then \
+		if cmp -s $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf \
+			$(srcdir)/mke2fs.conf; then \
+			true; \
+		else \
+			if grep -q ext4dev $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf ; then \
+				echo "	INSTALL_DATA $(root_sysconfdir)/@MKFSPROG@.conf.@E2FSPROGS@-new"; \
+				$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
+					$(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf.@E2FSPROGS@-new; \
+				echo "Warning: installing @MKFSPROG@.conf in $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf.@E2FSPROGS@-new"; \
+				echo "Check to see if you need to update your $(root_sysconfdir)/@MKFSPROG@.conf"; \
+			else \
+				echo "	INSTALL_DATA $(root_sysconfdir)/@MKFSPROG@.conf"; \
+				mv $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf \
+				   $(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf.@E2FSPROGS@-old; \
+				$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
+					$(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf; \
+				echo "Your @MKFSPROG@.conf is too old.  Backing up old version in"; \
+				echo "$(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf.@E2FSPROGS@-old.  Please check to see"; \
+				echo "if you have any local customizations that you wish to preserve."; \
+			fi; \
+			echo " "; \
+		fi; \
+	else \
+		echo "	INSTALL_DATA $(root_sysconfdir)/@MKFSPROG@.conf"; \
+		$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
+			$(DESTDIR)$(root_sysconfdir)/@MKFSPROG@.conf; \
+	fi
+
+install_ldiskfsprogs: install_common
+
+install_e2fsprogs: install_common
+	$(Q) for i in $(SPROGS_E2FSPROGS); do \
 		echo "	INSTALL $(root_sbindir)/$$i"; \
 		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(root_sbindir)/$$i; \
 	done
@@ -408,8 +471,6 @@ install: all $(SMANPAGES) $(UMANPAGES) installdirs
 		(cd $(DESTDIR)$(root_sbindir); \
 			$(LN) $(LINK_INSTALL_FLAGS) mke2fs mkfs.$$i); \
 	done
-	$(Q) (cd $(DESTDIR)$(root_sbindir); \
-		$(LN) $(LINK_INSTALL_FLAGS) tune2fs e2label)
 	$(Q) if test -n "$(FINDFS_LINK)"; then \
 		echo "	LINK $(root_sbindir)/findfs"; \
 		(cd $(DESTDIR)$(root_sbindir); \
@@ -423,7 +484,7 @@ install: all $(SMANPAGES) $(UMANPAGES) installdirs
 		echo "	INSTALL $(libdir)/$$i"; \
 		$(INSTALL_PROGRAM) $$i $(DESTDIR)$(libdir)/$$i; \
 	done
-	$(Q) for i in $(SMANPAGES); do \
+	$(Q) for i in $(SMANPAGES_E2FSPROGS); do \
 		for j in $(COMPRESS_EXT); do \
 			$(RM) -f $(DESTDIR)$(man8dir)/$$i.$$j; \
 		done; \
@@ -444,41 +505,6 @@ install: all $(SMANPAGES) $(UMANPAGES) installdirs
 		echo "	INSTALL_DATA $(man1dir)/$$i"; \
 		$(INSTALL_DATA) $$i $(DESTDIR)$(man1dir)/$$i; \
 	done
-	$(Q) for i in $(FMANPAGES); do \
-		for j in $(COMPRESS_EXT); do \
-			$(RM) -f $(DESTDIR)$(man5dir)/$$i.$$j; \
-		done; \
-		echo "	INSTALL_DATA $(man5dir)/$$i"; \
-		$(INSTALL_DATA) $$i $(DESTDIR)$(man5dir)/$$i; \
-	done
-	$(Q) if test -f $(DESTDIR)$(root_sysconfdir)/mke2fs.conf; then \
-		if cmp -s $(DESTDIR)$(root_sysconfdir)/mke2fs.conf \
-			$(srcdir)/mke2fs.conf; then \
-			true; \
-		else \
-			if grep -q ext4dev $(DESTDIR)$(root_sysconfdir)/mke2fs.conf ; then \
-				echo "	INSTALL_DATA $(root_sysconfdir)/mke2fs.conf.e2fsprogs-new"; \
-				$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
-					$(DESTDIR)$(root_sysconfdir)/mke2fs.conf.e2fsprogs-new; \
-				echo "Warning: installing mke2fs.conf in $(DESTDIR)$(root_sysconfdir)/mke2fs.conf.e2fsprogs-new"; \
-				echo "Check to see if you need to update your $(root_sysconfdir)/mke2fs.conf"; \
-			else \
-				echo "	INSTALL_DATA $(root_sysconfdir)/mke2fs.conf"; \
-				mv $(DESTDIR)$(root_sysconfdir)/mke2fs.conf \
-				   $(DESTDIR)$(root_sysconfdir)/mke2fs.conf.e2fsprogs-old; \
-				$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
-					$(DESTDIR)$(root_sysconfdir)/mke2fs.conf; \
-				echo "Your mke2fs.conf is too old.  Backing up old version in"; \
-				echo "$(DESTDIR)$(root_sysconfdir)/mke2fs.conf.e2fsprogs-old.  Please check to see"; \
-				echo "if you have any local customizations that you wish to preserve."; \
-			fi; \
-			echo " "; \
-		fi; \
-	else \
-		echo "	INSTALL_DATA $(root_sysconfdir)/mke2fs.conf"; \
-		$(INSTALL_DATA) $(srcdir)/mke2fs.conf \
-			$(DESTDIR)$(root_sysconfdir)/mke2fs.conf; \
-	fi
 
 install-strip: install
 	$(Q) for i in $(SPROGS); do \
@@ -523,8 +549,8 @@ uninstall:
 	for i in $(FMANPAGES); do \
 		$(RM) -f $(DESTDIR)$(man5dir)/$$i; \
 	done
-	if cmp -s $(srcdir)/mke2fs.conf $(DESTDIR)/$(root_sysconfdir)/mke2fs.conf; then \
-		$(RM) $(DESTDIR)/$(root_sysconfdir)/mke2fs.conf; \
+	if cmp -s $(srcdir)/mke2fs.conf $(DESTDIR)/$(root_sysconfdir)/@MKFSPROG@.conf; then \
+		$(RM) $(DESTDIR)/$(root_sysconfdir)/@MKFSPROG@.conf; \
 	fi
 
 clean:

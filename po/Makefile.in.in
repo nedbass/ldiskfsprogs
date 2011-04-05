@@ -10,7 +10,7 @@
 #
 # Origin: gettext-0.14
 
-PACKAGE = @PACKAGE@
+PACKAGE = @E2FSPROGS@
 VERSION = @VERSION@
 
 SHELL = /bin/sh

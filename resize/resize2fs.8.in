@@ -2,11 +2,11 @@
 .\" Copyright 1997 by Theodore Ts'o.  All Rights Reserved.
 .\" 
 .\" .TH RESIZE2FS 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
-.TH RESIZE2FS 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.TH @RESIZEFSPROG@ 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "@E2FSPROGS@ version @E2FSPROGS_VERSION@"
 .SH NAME
-resize2fs \- ext2/ext3/ext4 file system resizer
+@RESIZEFSPROG@ \- ext2/ext3/ext4 file system resizer
 .SH SYNOPSIS
-.B resize2fs
+.B @RESIZEFSPROG@
 [
 .B \-fFpPM
 ]
@@ -24,7 +24,7 @@ resize2fs \- ext2/ext3/ext4 file system resizer
 ]
 .SH DESCRIPTION
 The 
-.B resize2fs 
+.B @RESIZEFSPROG@
 program will resize ext2, ext3, or ext4 file systems.  It can be used to
 enlarge or shrink an unmounted file system located on 
 .IR device .
@@ -60,7 +60,7 @@ gigabytes, as the amazingly silly ``gibibytes''.  Makes you want to
 gibber, doesn't it?
 .PP
 The
-.B resize2fs
+.B @RESIZEFSPROG@
 program does not manipulate the size of partitions.  If you wish to enlarge
 a filesystem, you must make sure you can expand the size of the
 underlying partition first.  This can be done using 
@@ -75,11 +75,11 @@ disk cylinder as before!  Otherwise, the resize operation will
 certainly not work, and you may lose your entire filesystem.  
 After running
 .BR fdisk (8),
-run resize2fs to resize the ext2 filesystem 
+run @RESIZEFSPROG@ to resize the ext2 filesystem
 to use all of the space in the newly enlarged partition.
 .PP
 If you wish to shrink an ext2 partition, first use 
-.B resize2fs
+.B @RESIZEFSPROG@
 to shrink the size of filesystem.  Then you may use 
 .BR fdisk (8)
 to shrink the size of the partition.  When shrinking the size of 
@@ -88,7 +88,7 @@ of the ext2 filesystem!
 .SH OPTIONS
 .TP
 .B \-d \fIdebug-flags
-Turns on various resize2fs debugging features, if they have been compiled 
+Turns on various @RESIZEFSPROG@ debugging features, if they have been compiled
 into the binary.
 .I debug-flags
 should be computed by adding the numbers of the desired features 
@@ -101,13 +101,13 @@ from the following list:
 \	8\	\-\ Debug moving the inode table
 .TP 
 .B \-f
-Forces resize2fs to proceed with the filesystem resize operation, overriding 
-some safety checks which resize2fs normally enforces.
+Forces @RESIZEFSPROG@ to proceed with the filesystem resize operation, overriding
+some safety checks which @RESIZEFSPROG@ normally enforces.
 .TP
 .B \-F
 Flush the filesystem device's buffer caches before beginning.  Only
 really useful for doing 
-.B resize2fs
+.B @RESIZEFSPROG@
 time trials.
 .TP
 .B \-M
@@ -115,7 +115,7 @@ Shrink the filesystem to the minimum size.
 .TP
 .B \-p
 Prints out a percentage completion bars for each
-.B resize2fs
+.B @RESIZEFSPROG@
 operation during an offline resize, so that the user can keep track 
 of what the program is doing.
 .TP
@@ -124,25 +124,25 @@ Print the minimum size of the filesystem and exit.
 .TP
 .B \-S \fIRAID-stride
 The
-.B resize2fs
+.B @RESIZEFSPROG@
 program will heuristically determine the RAID stride that was specified
 when the filesystem was created.  This option allows the user to
-explicitly specify a RAID stride setting to be used by resize2fs instead.
+explicitly specify a RAID stride setting to be used by @RESIZEFSPROG@ instead.
 .SH KNOWN BUGS
-The minimum size of the filesystem as estimated by resize2fs may be
+The minimum size of the filesystem as estimated by @RESIZEFSPROG@ may be
 incorrect, especially for filesystems with 1k and 2k blocksizes.
 .SH AUTHOR
-.B resize2fs
+.B @RESIZEFSPROG@
 was written by Theodore Ts'o <tytso@mit.edu>.
 .SH COPYRIGHT
-Resize2fs is Copyright 1998 by Theodore Ts'o and PowerQuest, Inc.  All
+@RESIZEFSPROG@ is Copyright 1998 by Theodore Ts'o and PowerQuest, Inc.  All
 rights reserved.  
 As of April, 2000
-.B Resize2fs
+.B @RESIZEFSPROG@
 may be redistributed under the terms of the GPL.
 .SH SEE ALSO
 .BR fdisk (8),
-.BR e2fsck (8),
-.BR mke2fs (8),
+.BR @FSCKPROG@ (8),
+.BR @MKFSPROG@ (8),
 .BR lvm (8), 
 .BR lvextend (8)

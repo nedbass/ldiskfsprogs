@@ -2,19 +2,19 @@
 .\" Copyright 2006 by Theodore Ts'o.  All Rights Reserved.
 .\" This file may be copied under the terms of the GNU Public License.
 .\" 
-.TH e2fsck.conf 5 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.TH @FSCKPROG@.conf 5 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
 .SH NAME
-e2fsck.conf \- Configuration file for e2fsck
+@FSCKPROG@.conf \- Configuration file for @FSCKPROG@
 .SH DESCRIPTION
-.I e2fsck.conf
+.I @FSCKPROG@.conf
 is the configuration file for 
-.BR e2fsck (8).  
+.BR @FSCKPROG@ (8).  
 It controls the default behavior of 
-.BR e2fsck (8)
+.BR @FSCKPROG@ (8)
 while it is checking ext2, ext3, or ext4 filesystems.
 .PP
 The
-.I e2fsck.conf
+.I @FSCKPROG@.conf
 file uses an INI-style format.  Stanzas, or top-level sections, are 
 delimited by square braces: [ ].  Within each section, each line 
 defines a relation, which assigns tags to values, or to a subsection,
@@ -60,21 +60,21 @@ apply: "\en" (for the newline character),
 and "\e\e" (for the backslash character).
 .P
 The following stanzas are used in the 
-.I e2fsck.conf
+.I @FSCKPROG@.conf
 file.  They will be described in more detail in future sections of this
 document.
 .TP 
 .I [options]
 This stanza contains general configuration parameters for 
-.BR e2fsck 's
+.BR @FSCKPROG@ 's
 behavior.
 .TP
 .I [problems]
-This stanza allows the administrator to reconfigure how e2fsck handles
+This stanza allows the administrator to reconfigure how @FSCKPROG@ handles
 various filesystem inconsistencies.
 .TP
 .I [scratch_files]
-This stanza controls when e2fsck will attempt to use scratch files to
+This stanza controls when @FSCKPROG@ will attempt to use scratch files to
 reduce the need for memory.
 .SH THE [options] STANZA
 The following relations are defined in the 
@@ -83,8 +83,8 @@ stanza.
 .TP
 .I allow_cancellation
 If this relation is set to a boolean value of true, then if the user 
-interrupts e2fsck using ^C, and the filesystem is not explicitly flagged
-as containing errors, e2fsck will exit with an exit status of 0 instead
+interrupts @FSCKPROG@ using ^C, and the filesystem is not explicitly flagged
+as containing errors, @FSCKPROG@ will exit with an exit status of 0 instead
 of 32.  This setting defaults to false.
 .TP
 .I accept_time_fudge
@@ -92,7 +92,7 @@ Unfortunately, due to Windows' unfortunate design decision
 to configure the hardware clock to tick localtime, instead
 of the more proper and less error-prone UTC time, many
 users end up in the situation where the system clock is
-incorrectly set at the time when e2fsck is run.
+incorrectly set at the time when @FSCKPROG@ is run.
 .IP
 Historically this was usually due to some distributions
 having buggy init scripts and/or installers that didn't
@@ -111,21 +111,21 @@ boolean value of false.  This setting defaults to true.
 .TP
 .I broken_system_clock
 The
-.BR e2fsck (8)
+.BR @FSCKPROG@ (8)
 program has some hueristics that assume that the system clock is
 correct.  In addition, many system programs make similar assumptions.
 For example, the UUID library depends on time not going backwards in
 order for it to be able to make its guarantees about issuing universally
 unique ID's.  Systems with broken system clocks, are well, broken.
 However, broken system clocks, particularly in embedded systems, do
-exist.  E2fsck will attempt to use hueristics to determine if the time
+exist.  @FSCKPROG@ will attempt to use hueristics to determine if the time
 can no tbe trusted; and to skip time-based checks if this is true.  If
-this boolean is set to true, then e2fsck will always assume that the
+this boolean is set to true, then @FSCKPROG@ will always assume that the
 system clock can not be trusted.
 .TP
 .I clear_test_fs_flag
 This boolean relation controls whether or not 
-.BR e2fsck (8)
+.BR @FSCKPROG@ (8)
 will offer to clear
 the test_fs flag if the ext4 filesystem is available on the system.  It
 defaults to true.
@@ -134,14 +134,14 @@ defaults to true.
 This string relation controls the default handling of shared blocks in pass 1D.
 It can be set to dup or zero.  See the
 .I "-E clone" 
-option description in e2fsck(8).
+option description in @FSCKPROG@(8).
 .TP
 .I shared
 This string relation controls the default disposition of files discovered to 
 have shared blocks in pass 1D.  It can be set to preserve, lost+found, 
 or delete.  See the
 .I "-E shared" 
-option description in e2fsck(8).
+option description in @FSCKPROG@(8).
 .TP 
 .I defer_check_on_battery
 This boolean relation controls whether or not the interval between 
@@ -151,7 +151,7 @@ true.
 .TP
 .I indexed_dir_slack_percentage
 When
-.BR e2fsck (8)
+.BR @FSCKPROG@ (8)
 repacks a indexed directory, reserve the specified percentage of
 empty space in each leaf nodes so that a few new entries can
 be added to the directory without splitting leaf nodes, so that
@@ -168,7 +168,7 @@ subsection override the default treatment of that particular problem
 code.
 .P
 Note that inappropriate settings in this stanza may cause 
-.B e2fsck
+.B @FSCKPROG@
 to behave incorrectly, or even crash.  Most system administrators should
 not be making changes to this section without referring to source code.
 .P
@@ -181,7 +181,7 @@ inconsistency is detected to be overridden.
 .I preen_ok
 This boolean relation overrides the default behavior controlling 
 whether this filesystem problem should be automatically fixed when
-.B e2fsck
+.B @FSCKPROG@
 is running in preen mode.
 .TP
 .I no_ok
@@ -197,14 +197,14 @@ problem (or question) should be "no".
 This boolean relation overrides the default behavior controlling 
 whether or not the description for this filesystem problem should
 be suppressed when
-.B e2fsck
+.B @FSCKPROG@
 is running in preen mode.
 .TP
 .I no_nomsg
 This boolean relation overrides the default behavior controlling 
 whether or not the description for this filesystem problem should
 be suppressed when a problem forced not to be fixed, either because
-.B e2fsck
+.B @FSCKPROG@
 is run with the
 .B -n
 option or because the
@@ -226,7 +226,7 @@ stanza.
 .TP
 .I directory
 If the directory named by this relation exists and is writeable, then
-e2fsck will attempt to use this directory to store scratch files instead
+@FSCKPROG@ will attempt to use this directory to store scratch files instead
 of using in-memory data structures.
 .TP
 .I numdirs_threshold
@@ -243,7 +243,7 @@ This relation controls whether or not the scratch file directory is used
 instead of an in-memory data structure when tracking inode counts.  It
 defaults to true.
 .SH EXAMPLES
-The following recipe will prevent e2fsck from aborting during the boot
+The following recipe will prevent @FSCKPROG@ from aborting during the boot
 process when a filesystem contains orphaned files.  (Of course, this is
 not always a good idea, since critical files that are needed for the
 security of the system could potentially end up in lost+found, and
@@ -262,8 +262,8 @@ things out may be dangerous.)
 		}
 .SH FILES
 .TP
-.I /etc/e2fsck.conf
+.I /etc/@FSCKPROG@.conf
 The configuration file for 
-.BR e2fsck (8).
+.BR @FSCKPROG@ (8).
 .SH SEE ALSO
-.BR e2fsck (8)
+.BR @FSCKPROG@ (8)

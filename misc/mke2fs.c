@@ -72,7 +72,7 @@ extern int optind;
 extern int isatty(int);
 extern FILE *fpopen(const char *cmd, const char *mode);
 
-const char * program_name = "mke2fs";
+const char * program_name = MKFSPROG;
 const char * device_name /* = NULL */;
 
 /* Command line options */
@@ -883,12 +883,12 @@ static __u32 ok_features[3] = {
 static void syntax_err_report(const char *filename, long err, int line_num)
 {
 	fprintf(stderr,
-		_("Syntax error in mke2fs config file (%s, line #%d)\n\t%s\n"),
-		filename, line_num, error_message(err));
+		_("Syntax error in %s config file (%s, line #%d)\n\t%s\n"),
+		MKFSPROG, filename, line_num, error_message(err));
 	exit(1);
 }
 
-static const char *config_fn[] = { ROOT_SYSCONFDIR "/mke2fs.conf", 0 };
+static const char *config_fn[] = { ROOT_SYSCONFDIR "/" MKFSPROG ".conf", 0 };
 
 static void edit_feature(const char *str, __u32 *compat_array)
 {
@@ -1277,7 +1277,8 @@ static void PRS(int argc, char *argv[])
 
 		/* If called as mkfs.ext3, create a journal inode */
 		if (!strcmp(program_name, "mkfs.ext3") ||
-		    !strcmp(program_name, "mke3fs"))
+		    !strcmp(program_name, "mke3fs") ||
+		    !strcmp(program_name, "mkfs.ldiskfs"))
 			journal_size = -1;
 	}
 
@@ -1472,7 +1473,7 @@ static void PRS(int argc, char *argv[])
 	device_name = argv[optind++];
 
 	if (!quiet || show_version_only)
-		fprintf (stderr, "mke2fs %s (%s)\n", E2FSPROGS_VERSION,
+		fprintf (stderr, "%s %s (%s)\n", MKFSPROG, E2FSPROGS_VERSION,
 			 E2FSPROGS_DATE);
 
 	if (show_version_only) {
