@@ -1109,6 +1109,7 @@ if test x"$with_ldiskfsprogs" = xyes; then
 	IMAGEPROG="image.ldiskfs"
 	RESIZEFSPROG="resizefs.ldiskfs"
 	LDISKFSPROGS_CMT=""
+	E2FSPROGS_CMT=#
         AC_MSG_RESULT([enabled])
 else
         E2FSPROGS="e2fsprogs"
@@ -1123,6 +1124,7 @@ else
 	IMAGEPROG="e2image"
 	RESIZEFSPROG="resize2fs"
 	LDISKFSPROGS_CMT=#
+	E2FSPROGS_CMT=""
         AC_MSG_RESULT([disabled])
 fi
 AC_DEFINE_UNQUOTED(E2FSPROGS,    "$E2FSPROGS",   [name of e2fsprogs package])
@@ -1148,6 +1150,7 @@ AC_SUBST(PFSCKPROG)
 AC_SUBST(IMAGEPROG)
 AC_SUBST(RESIZEFSPROG)
 AC_SUBST(LDISKFSPROGS_CMT)
+AC_SUBST(E2FSPROGS_CMT)
 dnl
 dnl Linux and Hurd places root files in the / by default
 dnl

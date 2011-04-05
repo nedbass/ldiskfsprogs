@@ -18,14 +18,14 @@ BuildRequires: autoconf texinfo
 Group: System/Filesystems
 @LFSCK_CMT@BuildRequires: db-devel >= 4.1
 @LFSCK_CMT@Requires: db >= @DB4VERSION@
-Provides: e2fsbn ext2fs libcom_err = %{version} ldiskfsprogs = %{version}
-Obsoletes: ext2fs libcom_err < %{version}
+@E2FSPROGS_CMT@Provides: e2fsbn ext2fs libcom_err = %{version} ldiskfsprogs = %{version}
+@E2FSPROGS_CMT@Obsoletes: ext2fs libcom_err < %{version}
 %else
 Group: System Environment/Base
 @LFSCK_CMT@BuildRequires: db4-devel >= 4.1
 @LFSCK_CMT@Requires: db4 >= @DB4VERSION@
-Provides: ldiskfsprogs = %{version}
-Obsoletes: e4fsprogs e2fsprogs-libs < %{version}
+@E2FSPROGS_CMT@Provides: ldiskfsprogs = %{version}
+@E2FSPROGS_CMT@Obsoletes: e4fsprogs e2fsprogs-libs < %{version}
 %endif
 %if %{name} == "e2fsprogs"
 Provides: e2fsprogs-libs = %{version}
@@ -82,7 +82,7 @@ SMP systems.
 %configure --enable-elf-shlibs --enable-nls --enable-maintainer-mode \
 	%{?extra_config_flags:%extra_config_flags} \
 	@LFSCK_CMT@ --enable-lfsck \
-	@LDISKFSPROGS_CMT@ --with-ldiskfsprogs
+	@LDISKFSPROGS_CMT@ --with-ldiskfsprogs --disable-elf-shlibs
 make
 
 %install

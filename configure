@@ -649,6 +649,7 @@ root_libdir
 root_sbindir
 root_bindir
 root_prefix
+E2FSPROGS_CMT
 LDISKFSPROGS_CMT
 RESIZEFSPROG
 IMAGEPROG
@@ -18515,6 +18516,7 @@ _ACEOF
 	IMAGEPROG="image.ldiskfs"
 	RESIZEFSPROG="resizefs.ldiskfs"
 	LDISKFSPROGS_CMT=""
+	E2FSPROGS_CMT=#
         { $as_echo "$as_me:$LINENO: result: enabled" >&5
 $as_echo "enabled" >&6; }
 else
@@ -18530,6 +18532,7 @@ else
 	IMAGEPROG="e2image"
 	RESIZEFSPROG="resize2fs"
 	LDISKFSPROGS_CMT=#
+	E2FSPROGS_CMT=""
         { $as_echo "$as_me:$LINENO: result: disabled" >&5
 $as_echo "disabled" >&6; }
 fi
@@ -18587,6 +18590,7 @@ _ACEOF
 cat >>confdefs.h <<_ACEOF
 #define RESIZEFSPROG "$RESIZEFSPROG"
 _ACEOF
+
 
 
 
