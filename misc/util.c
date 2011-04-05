@@ -291,3 +291,11 @@ void print_check_message(ext2_filsys fs)
 	       fs->super->s_max_mnt_count,
 	       (double)fs->super->s_checkinterval / (3600 * 24));
 }
+
+void dump_mmp_msg(struct mmp_struct *mmp, const char *msg)
+{
+	if (msg)
+		printf("MMP check failed: %s\n", msg);
+	printf("MMP failure info: last update time: %llu node: %s device: %s\n",
+	       (long long)mmp->mmp_time, mmp->mmp_nodename, mmp->mmp_bdevname);
+}

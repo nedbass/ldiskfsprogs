@@ -1,0 +1,78 @@
+.\" -*- nroff -*-
+.\" Copyright 2004 by Andreas Dilger.  All Rights Reserved.
+.\" This file may be copied under the terms of the GNU Public License.
+.\"
+.TH LFSCK 8 "@E2FSPROGS_MONTH@ @E2FSPROGS_YEAR@" "E2fsprogs version @E2FSPROGS_VERSION@"
+.SH NAME
+lfsck \- check a Lustre distributed filesystem
+.SH SYNOPSIS
+.B lfsck
+[
+.B \-cdfhlnv
+]
+.B \--mdsdb
+.I mds_database_file
+.B \--ostdb
+.IR "ost1_database_file " [ "ost2_database_file " ...]
+.I filesystem
+.SH DESCRIPTION
+.B lfsck
+is used to check and repair the distributed coherency of a Lustre filesystem.
+.PP
+.I filesystem
+is the mountpoint of the Lustre filesystem to be checked. e.g.
+.IR /mnt/lustre ).
+.SH DESCRIPTION
+Lfsck is used to do the distributed coherency checking of a Lustre filesystem
+after
+.B e2fsck
+has been run on each of the local MDS and OST device filesystems.
+.B Lfsck
+will ensure that objects are not referenced by multiple MDS files, that there
+are no orphan objects on the OSTs (objects that do not have any file on the
+MDS which references them), and that all of the objects referenced by the
+MDS exist.  Under normal circumstances Lustre will maintain such coherency
+by distributed logging mechanisms, but under exceptional circumstances that
+may fail (e.g. disk failure, filesystem corruption leading to e2fsck repair).
+.SH OPTIONS
+.TP
+.B \-c
+Create (empty) missing OST objects referenced by MDS inodes.
+.TP
+.B \-d
+Delete orphaned objects from the filesystem.  Since objects on the OST are
+often only one of several stripes of a file it can be difficult to put
+multiple objects back together into a single usable file.
+.TP
+.B \-h
+Print a brief help message.
+.TP
+.B \-l
+Put orphaned objects into a lost+found directory in the root of the filesystem.
+.TP
+.B \-n
+Do not repair the filesystem, just perform a read-only check (default).
+.TP
+.B \-v
+Verbose operation - more verbosity by specifing option multiple times.
+.TP
+.BI \-\-mdsdb " mds_database_file"
+The MDS database file created by running
+.B e2fsck --mdsdb mds_database_file device
+on the MDS backing device.  This is required.
+.TP
+.BI \-\-ostdb " ost1_database_file " [ "ost2_database_file " ...]
+The OST database files created by running
+.B e2fsck --ostdb ost_database_file device
+on each of the OST backing devices.  These are required, unless an OST is
+unavailable, in which case all objects thereon will be considered missing.
+.SH REPORTING BUGS
+Bugs should be reported to Sun Microsystems, Inc. via Bugzilla:
+http://bugzilla.lustre.org/
+.SH AUTHOR
+This version of
+.B lfsck
+was originally written by Liam Kelleher <liam.kelleher@hp.com>
+and maintained by Andreas Dilger <adilger@whamcloud.com>
+.SH SEE ALSO
+.BR e2fsck (8)

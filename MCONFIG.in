@@ -97,6 +97,9 @@ DEPLIBSS = $(LIB)/libss@LIB_EXT@
 DEPLIBCOM_ERR = $(LIB)/libcom_err@LIB_EXT@
 DEPLIBUUID = @DEPLIBUUID@
 DEPLIBBLKID = @DEPLIBBLKID@ @PRIVATE_LIBS_CMT@ $(DEPLIBUUID)
+#Version of libdb lib found by configure
+LIBDB = @libdb@
+
 
 STATIC_LIBSS = $(LIB)/libss@STATIC_LIB_EXT@ @DLOPEN_LIB@
 STATIC_LIBCOM_ERR = $(LIB)/libcom_err@STATIC_LIB_EXT@ @SEM_INIT_LIB@
@@ -202,8 +205,8 @@ Makefile: $(srcdir)/Makefile.in $(top_builddir)/MCONFIG \
 		$(DEP_MAKEFILE) $(top_builddir)/config.status
 	cd $(top_builddir); CONFIG_FILES=$(my_dir)/Makefile ./config.status
 
-@MAINTAINER_CMT@$(top_srcdir)/configure: $(top_srcdir)/configure.in
-@MAINTAINER_CMT@	cd $(top_srcdir) && autoconf
+$(top_srcdir)/configure: $(top_srcdir)/configure.in
+	cd $(top_srcdir) && autoconf
 
 #
 # Make depend magic...

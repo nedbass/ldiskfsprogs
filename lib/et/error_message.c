@@ -148,25 +148,7 @@ const char * error_message (errcode_t code)
     }
     et_list_unlock();
 oops:
-    strcpy (buffer, "Unknown code ");
-    if (table_num) {
-	strcat (buffer, error_table_name (table_num));
-	strcat (buffer, " ");
-    }
-    for (cp = buffer; *cp; cp++)
-	;
-    if (offset >= 100) {
-	*cp++ = '0' + offset / 100;
-	offset %= 100;
-	started++;
-    }
-    if (started || offset >= 10) {
-	*cp++ = '0' + offset / 10;
-	offset %= 10;
-    }
-    *cp++ = '0' + offset;
-    *cp = '\0';
-    return(buffer);
+    return "Unknown code";
 }
 
 /*

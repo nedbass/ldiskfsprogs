@@ -18,6 +18,7 @@
 
 #include "ext2_fs.h"
 #include "ext2fs.h"
+#include "ext3_extents.h"
 
 /*
  * This function returns 1 if the inode's block entries actually
@@ -40,12 +41,23 @@ int ext2fs_inode_has_valid_blocks(struct ext2_inode *inode)
 	if (LINUX_S_ISLNK (inode->i_mode)) {
 		if (ext2fs_file_acl_block(inode) == 0) {
 			/* With no EA block, we can rely on i_blocks */
-			if (inode->i_blocks == 0)
-				return 0;
+			if (inode->i_flags & EXT4_EXTENTS_FL) {
+				struct ext3_extent_header *eh;
+				eh = (struct ext3_extent_header *)inode->i_block;
+				if (eh->eh_entries == 0)
+					return 0;
+			} else {
+				if (inode->i_blocks == 0)
+					return 0;
+			}
 		} else {
 			/* With an EA block, life gets more tricky */
 			if (inode->i_size >= EXT2_N_BLOCKS*4)
 				return 1; /* definitely using i_block[] */
+			/*
+			 * we cannot have EA + extents, so assume we are not
+			 * using extents
+			 */
 			if (inode->i_size > 4 && inode->i_block[1] == 0)
 				return 1; /* definitely using i_block[] */
 			return 0; /* Probably a fast symlink */

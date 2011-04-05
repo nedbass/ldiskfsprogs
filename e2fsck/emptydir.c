@@ -98,9 +98,9 @@ void add_empty_dirblock(empty_dir_info edi,
 	       db->blk, db->blockcnt, db->ino);
 
 	ext2fs_mark_block_bitmap2(edi->empty_dir_blocks, db->blk);
-	if (ext2fs_test_inode_bitmap(edi->dir_map, db->ino))
+	if (ext2fs_test_inode_bitmap2(edi->dir_map, db->ino))
 		return;
-	ext2fs_mark_inode_bitmap(edi->dir_map, db->ino);
+	ext2fs_mark_inode_bitmap2(edi->dir_map, db->ino);
 
 	ext2fs_add_dir_block2(edi->empty_dblist, db->ino,
 			      db->blk, db->blockcnt);

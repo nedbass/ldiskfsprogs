@@ -88,6 +88,8 @@ struct struct_io_manager {
 					int count, const void *data);
 	errcode_t (*discard)(io_channel channel, unsigned long long block,
 			     unsigned long long count);
+	errcode_t (*readahead)(io_channel channel, unsigned long block,
+			       int count);
 	long	reserved[16];
 };
 
@@ -101,6 +103,7 @@ struct struct_io_manager {
 #define io_channel_close(c) 		((c)->manager->close((c)))
 #define io_channel_set_blksize(c,s)	((c)->manager->set_blksize((c),s))
 #define io_channel_read_blk(c,b,n,d)	((c)->manager->read_blk((c),b,n,d))
+#define io_channel_readahead(c,b,n)	((c)->manager->readahead((c),b,n))
 #define io_channel_write_blk(c,b,n,d)	((c)->manager->write_blk((c),b,n,d))
 #define io_channel_flush(c) 		((c)->manager->flush((c)))
 #define io_channel_bumpcount(c)		((c)->refcount++)

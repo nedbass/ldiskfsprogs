@@ -1,0 +1,116 @@
+.TH e2scan 1 "2006 Sep 26" Lustre "backup utilities"
+.SH NAME
+e2scan \- scan an Ext2-type filesystem for modified inodes
+.SH SYNOPSIS
+.br
+.B e2scan
+@E2SCAN_MAN@{
+.B -l
+@E2SCAN_MAN@|
+@E2SCAN_MAN@.B -f
+@E2SCAN_MAN@}
+[
+.BI -a " groups"
+] [
+.BI -b " blocks"
+] [
+.BI -C " chdir"
+] [
+@E2SCAN_MAN@.BI -d " database"
+@E2SCAN_MAN@] [
+.BI -n " filename"
+] [
+.BI -N " date"
+] [
+.BI -o " outfile"
+]
+.I device
+.br
+.SH DESCRIPTION
+.BR e2scan ,
+iterates all inodes on
+.IR device ,
+find inodes modified since the specified time (default 1 day), and prints
+their pathnames relative to the root of the filesystem.  This allows the
+pathnames to be used as input to a backup tool running in the mountpoint, like
+.BR "tar \-C" ,
+as the filesystem may be mounted at an arbitrary mountpoint.
+
+The
+.B e2scan
+program is optimized for scanning an entire filesystem for (modified) files,
+but is not efficient for smaller subdirectory scans.  Use
+.BR find (1)
+for that purpose instead.
+.SH OPTIONS
+.TP
+.BI \-a " groups"
+Set readahead for inode table blocks to get better performance when scanning
+.IR device .
+Default is 1 group of readahead.
+.TP
+.BI \-b " inode_buffer_blocks"
+Set number of inode blocks to read from disk at a time.
+.TP
+.BI \-C " directory"
+Specify the working directory (relative to the root of the filesystem
+being scanned) for the output pathnames.  Only directories underneath
+the root will be candidates for listing.  For Lustre MDT filesystems the
+pathname must be prefixed with "/ROOT" to dump the client visible filesystem.
+@E2SCAN_MAN@.TP
+@E2SCAN_MAN@.BI \-d " database_file"
+@E2SCAN_MAN@Specify output file for database when running in
+@E2SCAN_MAN@.B \-f
+@E2SCAN_MAN@mode.
+.TP
+.B \-D
+Also include directories in the output.  The default is to only list files,
+because tools like
+.BR tar (1)
+will recurse into directories and files that are also listed therein will be
+backed up twice.
+@E2SCAN_MAN@.TP
+@E2SCAN_MAN@.B \-f
+@E2SCAN_MAN@List files in the filesystem and insert them into the
+@E2SCAN_MAN@.BR sqlite3 (1)
+@E2SCAN_MAN@database named by the
+@E2SCAN_MAN@.B \-d
+@E2SCAN_MAN@option.
+.TP
+.B \-l
+List files in the filesystem to standard output, or to the file specified
+with the
+.B \-o
+option.  This is the default mode.
+.TP
+.BI \-n " filename"
+Dump only files newer than the specified
+.IR filename .
+.TP
+.BI \-N " date"
+Dump only files newer than the specified date.  This supports a wide
+variety of input formats like "YYYY-MM-DD HH:MM:SS".  Use a date of
+.R 0
+to dump all files.
+.TP
+.BI \-o " outfile"
+Record the files found into
+.I outfile
+instead of the default standard output.
+.SH EXAMPLES
+To dump all of the files in the filesystem into the file
+.IR myfilelist :
+.IP
+e2scan -N 0 -o myfilelist /dev/sdb1
+.PP
+To list files and directories newer than Feb 6, 2007 in the /home directory:
+.IP
+e2scan -D -N "Feb 6 00:00:00 2007" -C /home /dev/sdb1
+.PP
+.SH AUTHOR
+This version of
+.B e2scan
+was originally written by Vladimir Saviliev <vladimir.saviliev@sun.com>
+and Andreas Dilger <adilger@whamcloud.com>.
+.SH SEE ALSO
+.BR find (1)

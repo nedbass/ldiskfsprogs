@@ -284,6 +284,9 @@ _("Warning: the backup superblock/group descriptors at block %u contain\n"
 				ext2fs_group_desc_csum_set(fs, group);
 				ext2fs_free_blocks_count_add(fs->super, 1);
 			}
+			/* The kernel doesn't need to zero the itable blocks */
+			ext2fs_bg_flags_set(fs, i, EXT2_BG_INODE_ZEROED |
+					    ext2fs_bg_flags(fs, i));
 		}
 		group_block += fs->super->s_blocks_per_group;
 	}
@@ -503,6 +506,10 @@ static void create_journal_dev(ext2_filsys fs)
 			_("while initializing journal superblock"));
 		exit(1);
 	}
+ 
+	if (journal_flags & EXT2_MKJOURNAL_LAZYINIT)
+		goto write_superblock;
+ 
 	ext2fs_numeric_progress_init(fs, &progress,
 				     _("Zeroing journal device: "),
 				     ext2fs_blocks_count(fs->super));
@@ -527,6 +534,8 @@ static void create_journal_dev(ext2_filsys fs)
 	}
 	ext2fs_zero_blocks2(0, 0, 0, 0, 0);
 
+	ext2fs_numeric_progress_close(fs, &progress, NULL);
+write_superblock:
 	retval = io_channel_write_blk64(fs->io,
 					fs->super->s_first_data_block+1,
 					1, buf);
@@ -535,7 +544,6 @@ static void create_journal_dev(ext2_filsys fs)
 			_("while writing journal superblock"));
 		exit(1);
 	}
-	ext2fs_numeric_progress_close(fs, &progress, NULL);
 }
 
 static void show_stats(ext2_filsys fs)
@@ -746,6 +754,12 @@ static void parse_extended_opts(struct ext2_super_block *param,
 			}
 		} else if (!strcmp(token, "test_fs")) {
 			param->s_flags |= EXT2_FLAGS_TEST_FILESYS;
+		} else if (!strcmp(token, "lazy_journal_init")) {
+			if (arg)
+				journal_flags |= strtoul(arg, &p, 0) ?
+						EXT2_MKJOURNAL_LAZYINIT : 0;
+			else
+				journal_flags |= EXT2_MKJOURNAL_LAZYINIT;
 		} else if (!strcmp(token, "lazy_itable_init")) {
 			if (arg)
 				lazy_itable_init = strtoul(arg, &p, 0);
@@ -770,6 +784,7 @@ static void parse_extended_opts(struct ext2_super_block *param,
 			"\tstripe-width=<RAID stride * data disks in blocks>\n"
 			"\tresize=<resize maximum size in blocks>\n"
 			"\tlazy_itable_init=<0 to disable, 1 to enable>\n"
+			"\tlazy_journal_init=<0 to disable, 1 to enable>\n"
 			"\ttest_fs\n"
 			"\tdiscard\n"
 			"\tnodiscard\n\n"),
@@ -798,6 +813,9 @@ static __u32 ok_features[3] = {
 		EXT3_FEATURE_INCOMPAT_JOURNAL_DEV|
 		EXT2_FEATURE_INCOMPAT_META_BG|
 		EXT4_FEATURE_INCOMPAT_FLEX_BG|
+		EXT4_FEATURE_INCOMPAT_EA_INODE|
+		EXT4_FEATURE_INCOMPAT_MMP |
+		EXT4_FEATURE_INCOMPAT_DIRDATA|
 		EXT4_FEATURE_INCOMPAT_64BIT,
 	/* R/O compat */
 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE|
@@ -1381,7 +1399,7 @@ profile_error:
 			}
 			break;
 		case 'v':
-			verbose = 1;
+			verbose++;
 			break;
 		case 'F':
 			force++;
@@ -1778,6 +1796,9 @@ profile_error:
 						 "lazy_itable_init",
 						 lazy_itable_init);
 	discard = get_bool_from_profile(fs_types, "discard" , discard);
+	journal_flags |= get_bool_from_profile(fs_types,
+					       "lazy_journal_init", 0) ?
+					       EXT2_MKJOURNAL_LAZYINIT : 0;
 
 	/* Get options from profile */
 	for (cpp = fs_types; *cpp; cpp++) {
@@ -2010,29 +2031,37 @@ static int mke2fs_discard_device(ext2_filsys fs)
 	count *= (1024 * 1024);
 	count /= fs->blocksize;
 
-	ext2fs_numeric_progress_init(fs, &progress,
-				     _("Discarding device blocks: "),
-				     blocks);
 	while (cur < blocks) {
-		ext2fs_numeric_progress_update(fs, &progress, cur);
-
 		if (cur + count > blocks)
 			count = blocks - cur;
 
 		retval = io_channel_discard(fs->io, cur, count, fs->blocksize);
+		if (cur == 0) {
+			/* If discard is unimplemented skip the progress bar */
+			if (retval == EXT2_ET_UNIMPLEMENTED)
+				return retval;
+
+			ext2fs_numeric_progress_init(fs, &progress,
+						_("Discarding device blocks: "),
+						blocks);
+		}
+
+		ext2fs_numeric_progress_update(fs, &progress, cur);
+
 		if (retval)
 			break;
+
 		cur += count;
 	}
 
 	if (retval) {
-		ext2fs_numeric_progress_close(fs, &progress,
-				      _("failed - "));
+		ext2fs_numeric_progress_close(fs, &progress, _("failed - "));
 		if (!quiet)
 			printf("%s\n",error_message(retval));
-	} else
+	} else {
 		ext2fs_numeric_progress_close(fs, &progress,
 				      _("done                            \n"));
+	}
 
 	return retval;
 }
@@ -2355,6 +2384,20 @@ int main (int argc, char *argv[])
 	}
 no_journal:
 
+	if (!super_only) {
+		ext2fs_set_gdt_csum(fs);
+		if (fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) {
+			retval = ext2fs_mmp_init(fs);
+			if (retval) {
+				fprintf(stderr, _("\nError while enabling "
+					"multiple mount protection feature."));
+				exit(1);
+			}
+			printf(_("Multiple mount protection has been enabled "
+				 "with update interval %d seconds.\n"),
+				 fs->super->s_mmp_update_interval);
+		}
+	}
 	if (!quiet)
 		printf(_("Writing superblocks and "
 		       "filesystem accounting information: "));

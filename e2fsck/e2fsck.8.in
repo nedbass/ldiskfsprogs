@@ -180,6 +180,19 @@ separated, and may take an argument using the equals ('=') sign.  The
 following options are supported:
 .RS 1.2i
 .TP
+.BI clone= dup|zero
+Resolve files with shared blocks in pass 1D by giving each file a private
+copy of the blocks (dup);
+or replacing the shared blocks with private, zero-filled blocks (zero).  
+The default is dup.
+.TP
+.BI shared= preserve|lost+found|delete
+Files with shared blocks discovered in pass 1D are cloned and then left 
+in place (preserve); 
+cloned and then disconnected from their parent directory,
+then reconnected to /lost+found in pass 3 (lost+found); 
+or simply deleted (delete).  The default is preserve.
+.TP
 .BI ea_ver= extended_attribute_version
 Set the version of the extended attribute blocks which
 .B e2fsck
@@ -189,6 +202,15 @@ be 1 or 2.  The default extended attribute version format is 2.
 .BI journal_only
 Only replay the journal if required, but do not perform any further checks
 or repairs.
+.TP
+.BI inode_badness_threshold= threshold_value
+A badness counter is associated with every inode, which determines the degree
+of inode corruption. Each error found in the inode will increase the badness by
+1 or 2, and inodes with a badness at or above
+.I threshold_value
+will be prompted for deletion. The default
+.I threshold_value
+is 7.
 .TP
 .BI fragcheck
 During pass 1, print a detailed report of any discontiguous blocks for
@@ -311,6 +333,20 @@ may not be specified at the same time as the
 or
 .B \-p
 options.
+@LFSCK_MAN@.TP
+@LFSCK_MAN@.BI \-\-mdsdb " mds_database_filename"
+@LFSCK_MAN@Specify which file to use for an MDS database on a Lustre filesystem.
+@LFSCK_MAN@The mdsdb also needs to be specified when creating an OST database with
+@LFSCK_MAN@.B \-\-ostdb
+@LFSCK_MAN@but the mdsdb file used in a read-only manner.
+@LFSCK_MAN@.TP
+@LFSCK_MAN@.BI \-\-ostdb " ostN_database_filename"
+@LFSCK_MAN@Specify which file to use for an OST database on a Lustre filesystem.
+@LFSCK_MAN@A separate database file should be specified for each OST device in
+@LFSCK_MAN@the filesystem.  For convenience a stub
+@LFSCK_MAN@.BR mdsdb .hdr
+@LFSCK_MAN@file is generated for use by the OST e2fsck to avoid the need to
+@LFSCK_MAN@wait for the MDS e2fsck to finish or copy the full mdsdb to the OSTs.
 .SH EXIT CODE
 The exit code returned by
 .B e2fsck

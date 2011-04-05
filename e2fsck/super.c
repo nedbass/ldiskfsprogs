@@ -170,8 +170,7 @@ static int release_inode_blocks(e2fsck_t ctx, ext2_ino_t ino,
 	if (inode->i_links_count) {
 		pb.truncating = 1;
 		pb.truncate_block = (e2_blkcnt_t)
-			((((long long)inode->i_size_high << 32) +
-			  inode->i_size + fs->blocksize - 1) /
+			((EXT2_I_SIZE(inode) + fs->blocksize - 1) /
 			 fs->blocksize);
 		pb.truncate_offset = inode->i_size % fs->blocksize;
 	} else {
@@ -835,8 +834,7 @@ void check_super_block(e2fsck_t ctx)
 	 * write time is in the future.
 	 */
 	if (!broken_system_clock &&
-	    !(ctx->flags & E2F_FLAG_TIME_INSANE) &&
-	    fs->super->s_mtime > (__u32) ctx->now) {
+	    EXT4_XTIME_FUTURE(ctx, fs->super, fs->super->s_mtime, 0)) {
 		pctx.num = fs->super->s_mtime;
 		problem = PR_0_FUTURE_SB_LAST_MOUNT;
 		if (fs->super->s_mtime <= (__u32) ctx->now + ctx->time_fudge)
@@ -847,8 +845,7 @@ void check_super_block(e2fsck_t ctx)
 		}
 	}
 	if (!broken_system_clock &&
-	    !(ctx->flags & E2F_FLAG_TIME_INSANE) &&
-	    fs->super->s_wtime > (__u32) ctx->now) {
+	    EXT4_XTIME_FUTURE(ctx, fs->super, fs->super->s_wtime, 0)) {
 		pctx.num = fs->super->s_wtime;
 		problem = PR_0_FUTURE_SB_LAST_WRITE;
 		if (fs->super->s_wtime <= (__u32) ctx->now + ctx->time_fudge)

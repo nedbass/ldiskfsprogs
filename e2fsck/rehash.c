@@ -148,7 +148,7 @@ static int fill_dir_block(ext2_filsys fs,
 		}
 		ent = fd->harray + fd->num_array++;
 		ent->dir = dirent;
-		fd->dir_size += EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
+		fd->dir_size += __EXT2_DIR_REC_LEN(dirent->name_len & 0xFF);
 		ent->ino = dirent->inode;
 		if (fd->compress)
 			ent->hash = ent->minor_hash = 0;
@@ -430,16 +430,17 @@ static errcode_t copy_dir_entries(e2fsck_t ctx,
 		return retval;
 	dirent = (struct ext2_dir_entry *) block_start;
 	prev_rec_len = 0;
+	rec_len = 0;
 	left = fs->blocksize;
 	slack = fd->compress ? 12 :
 		(fs->blocksize * ctx->htree_slack_percentage)/100;
 	if (slack < 12)
 		slack = 12;
-	for (i=0; i < fd->num_array; i++) {
+	for (i = 0; i < fd->num_array; i++) {
 		ent = fd->harray + i;
 		if (ent->dir->inode == 0)
 			continue;
-		rec_len = EXT2_DIR_REC_LEN(ent->dir->name_len & 0xFF);
+		rec_len = __EXT2_DIR_REC_LEN(ent->dir->name_len & 0xFF);
 		if (rec_len > left) {
 			if (left) {
 				left += prev_rec_len;

@@ -111,10 +111,6 @@ errcode_t e2fsck_reset_context(e2fsck_t ctx)
 		ext2fs_free_inode_bitmap(ctx->inode_bb_map);
 		ctx->inode_bb_map = 0;
 	}
-	if (ctx->inode_bad_map) {
-		ext2fs_free_inode_bitmap(ctx->inode_bad_map);
-		ctx->inode_bad_map = 0;
-	}
 	if (ctx->inode_imagic_map) {
 		ext2fs_free_inode_bitmap(ctx->inode_imagic_map);
 		ctx->inode_imagic_map = 0;
@@ -158,6 +154,7 @@ errcode_t e2fsck_reset_context(e2fsck_t ctx)
 	ctx->fs_fragmented = 0;
 	ctx->fs_fragmented_dir = 0;
 	ctx->large_files = 0;
+	ctx->fs_unexpanded_inodes = 0;
 
 	for (i=0; i < MAX_EXTENT_DEPTH_COUNT; i++)
 		ctx->extent_depth_count[i] = 0;
@@ -196,8 +193,11 @@ void e2fsck_free_context(e2fsck_t ctx)
 typedef void (*pass_t)(e2fsck_t ctx);
 
 pass_t e2fsck_passes[] = {
-	e2fsck_pass1, e2fsck_pass2, e2fsck_pass3, e2fsck_pass4,
-	e2fsck_pass5, 0 };
+	e2fsck_pass1, e2fsck_pass2, e2fsck_pass3, e2fsck_pass4, e2fsck_pass5,
+#ifdef ENABLE_LFSCK
+	e2fsck_pass6,
+#endif
+	0 };
 
 #define E2F_FLAG_RUN_RETURN	(E2F_FLAG_SIGNAL_MASK|E2F_FLAG_RESTART)
 
@@ -205,6 +205,7 @@ int e2fsck_run(e2fsck_t ctx)
 {
 	int	i;
 	pass_t	e2fsck_pass;
+	int error;
 
 #ifdef HAVE_SETJMP_H
 	if (setjmp(ctx->abort_loc)) {
@@ -217,6 +218,9 @@ int e2fsck_run(e2fsck_t ctx)
 	for (i=0; (e2fsck_pass = e2fsck_passes[i]); i++) {
 		if (ctx->flags & E2F_FLAG_RUN_RETURN)
 			break;
+		error = e2fsck_mmp_update(ctx->fs);
+		if (error)
+			fatal_error(ctx, 0);
 		e2fsck_pass(ctx);
 		if (ctx->progress)
 			(void) (ctx->progress)(ctx, 0, 0, 0);

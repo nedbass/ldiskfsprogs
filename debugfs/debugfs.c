@@ -78,6 +78,8 @@ static void open_filesystem(char *device, int open_flags, blk64_t superblock,
 			"opening read-only because of catastrophic mode");
 		open_flags &= ~EXT2_FLAG_RW;
 	}
+	if (catastrophic)
+		open_flags |= EXT2_FLAG_SKIP_MMP;
 
 	retval = ext2fs_open(device, open_flags, superblock, blocksize,
 			     unix_io_manager, &current_fs);
@@ -492,9 +494,38 @@ static void dump_xattr_string(FILE *out, const char *str, int len)
 			fprintf(out, "%02x ", (unsigned char)str[i]);
 }
 
+#ifdef ENABLE_LFSCK
+#include "ext2fs/lfsck.h"
+
+static void print_fidstr(FILE *out, ext2_ino_t inode_num, void *data, int len)
+{
+	static int fid_size_warning;
+	struct filter_fid *ff = data;
+
+	if (len < sizeof(*ff)) {
+		fprintf(stderr, "%s: error: fid for inode %u smaller than "
+			"expected (%d bytes), recompile?\n",
+			debug_prog_name, inode_num, len);
+		return;
+	}
+	if (len > sizeof(*ff) && !fid_size_warning) {
+		fprintf(stderr, "%s: warning: fid for inode %u larger than "
+			"expected (%d bytes), recompile?\n",
+			debug_prog_name, inode_num, len);
+		fid_size_warning = 1;
+	}
+	fprintf(out, "  fid: objid=%llu seq=%llu parent="DFID" stripe=%u\n",
+		ext2fs_le64_to_cpu(ff->ff_objid),
+		ext2fs_le64_to_cpu(ff->ff_seq),
+		ext2fs_le64_to_cpu(ff->ff_parent_seq),
+		ext2fs_le32_to_cpu(ff->ff_parent_oid), /* f_ver */ 0,
+		ext2fs_le32_to_cpu(ff->ff_stripe));
+}
+#endif /* ENABLE_LFSCK */
+
 static void internal_dump_inode_extra(FILE *out,
 				      const char *prefix EXT2FS_ATTR((unused)),
-				      ext2_ino_t inode_num EXT2FS_ATTR((unused)),
+				      ext2_ino_t inode_num,
 				      struct ext2_inode_large *inode)
 {
 	struct ext2_ext_attr_entry *entry;
@@ -534,6 +565,16 @@ static void internal_dump_inode_extra(FILE *out,
 			dump_xattr_string(out, start + entry->e_value_offs,
 						entry->e_value_size);
 			fprintf(out, "\" (%u)\n", entry->e_value_size);
+#ifdef ENABLE_LFSCK
+			/* Special decoding for Lustre fid */
+			if ((entry->e_name_index == EXT2_ATTR_INDEX_TRUSTED ||
+			     entry->e_name_index == EXT2_ATTR_INDEX_LUSTRE) &&
+			    !strncmp(EXT2_EXT_ATTR_NAME(entry),
+				     "fid", entry->e_name_len))
+				print_fidstr(out, inode_num,
+					     start + entry->e_value_offs,
+					     entry->e_value_size);
+#endif
 			entry = next;
 		}
 	}
@@ -722,12 +763,9 @@ void internal_dump_inode(FILE *out, const char *prefix,
 	}
 	fprintf(out, "%sUser: %5d   Group: %5d   Size: ",
 		prefix, inode_uid(*inode), inode_gid(*inode));
-	if (LINUX_S_ISREG(inode->i_mode)) {
-		unsigned long long i_size = (inode->i_size |
-				    ((unsigned long long)inode->i_size_high << 32));
-
-		fprintf(out, "%llu\n", i_size);
-	} else
+	if (LINUX_S_ISREG(inode->i_mode))
+		fprintf(out, "%llu\n", EXT2_I_SIZE(inode));
+	else
 		fprintf(out, "%d\n", inode->i_size);
 	if (os == EXT2_OS_HURD)
 		fprintf(out,
@@ -855,7 +893,7 @@ void do_stat(int argc, char *argv[])
 	return;
 }
 
-void do_dump_extents(int argc, char *argv[])
+void do_dump_extents(int argc, char **argv)
 {
 	struct ext2_inode inode;
 	ext2_ino_t	ino;
@@ -876,8 +914,7 @@ void do_dump_extents(int argc, char *argv[])
 		}
 	}
 
-	if (argc != optind+1) {
-	print_usage:
+	if (argc != optind + 1) {
 		com_err(0, 0, "Usage: dump_extents [-n] [-l] file");
 		return;
 	}
@@ -902,9 +939,7 @@ void do_dump_extents(int argc, char *argv[])
 		return;
 	}
 
-	logical_width = int_log10(((inode.i_size |
-				    (__u64) inode.i_size_high << 32) +
-				   current_fs->blocksize - 1) /
+	logical_width = int_log10((EXT2_I_SIZE(&inode)+current_fs->blocksize-1)/
 				  current_fs->blocksize) + 1;
 	if (logical_width < 5)
 		logical_width = 5;
@@ -2131,6 +2166,39 @@ void do_punch(int argc, char *argv[])
 			(unsigned long long) start, (unsigned long long) end);
 		return;
 	}
+}
+
+void do_dump_mmp(int argc, char *argv[])
+{
+	struct mmp_struct *mmp_s;
+	errcode_t retval = 0;
+
+	if (current_fs->mmp_buf == NULL) {
+		retval = ext2fs_get_mem(current_fs->blocksize,
+					&current_fs->mmp_buf);
+		if (retval) {
+			com_err(argv[0], 0, "Could not allocate memory.\n");
+			return;
+	 	}
+	}
+
+	mmp_s = current_fs->mmp_buf;
+
+	retval = ext2fs_mmp_read(current_fs, current_fs->super->s_mmp_block,
+				 current_fs->mmp_buf);
+	if (retval) {
+		com_err(argv[0], retval, "Error reading MMP block.\n");
+		return;
+	}
+
+	fprintf(stdout, "MMP Block: %llu\n", current_fs->super->s_mmp_block);
+	fprintf(stdout, "MMP Update Interval: %d\n",
+		current_fs->super->s_mmp_update_interval);
+	fprintf(stdout, "MMP Check Interval: %d\n", mmp_s->mmp_check_interval);
+	fprintf(stdout, "MMP Sequence: %u\n", mmp_s->mmp_seq);
+	fprintf(stdout, "Last Update Time: %llu\n", mmp_s->mmp_time);
+	fprintf(stdout, "Node: %s\n", mmp_s->mmp_nodename);
+	fprintf(stdout, "Device: %s\n", mmp_s->mmp_bdevname);
 }
 
 static int source_file(const char *cmd_file, int sci_idx)

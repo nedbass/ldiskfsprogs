@@ -455,6 +455,11 @@ errcode_t ext2fs_close(ext2_filsys fs)
 		if (retval)
 			return retval;
 	}
+
+	retval = ext2fs_mmp_stop(fs);
+	if (retval)
+		return retval;
+
 	ext2fs_free(fs);
 	return 0;
 }

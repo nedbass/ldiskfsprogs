@@ -28,6 +28,10 @@ extern "C" {
 #if (!defined(__GNUC__) && !defined(__WATCOMC__))
 #define NO_INLINE_FUNCS
 #endif
+ 
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 600	/* for posix_memalign() */
+#endif
 
 /*
  * Where the master copy of the superblock is located, and how big
@@ -184,6 +188,7 @@ typedef struct ext2_file *ext2_file_t;
 #define EXT2_FLAG_64BITS		0x20000
 #define EXT2_FLAG_PRINT_PROGRESS	0x40000
 #define EXT2_FLAG_DIRECT_IO		0x80000
+#define EXT2_FLAG_SKIP_MMP		0x100000
 
 /*
  * Special flag in the ext2 inode i_flag field that means that this is
@@ -193,12 +198,20 @@ typedef struct ext2_file *ext2_file_t;
 
 /*
  * Flags for mkjournal
- *
- * EXT2_MKJOURNAL_V1_SUPER	Make a (deprecated) V1 journal superblock
  */
-#define EXT2_MKJOURNAL_V1_SUPER	0x0000001
+#define EXT2_MKJOURNAL_V1_SUPER	0x0000001 /* create V1 superblock (deprecated) */
+#define EXT2_MKJOURNAL_LAZYINIT	0x0000002 /* don't zero journal inode before use*/
 
 struct opaque_ext2_group_desc;
+
+/*
+ * The timestamp in the MMP structure will be updated by e2fsck at some
+ * arbitary intervals (start of passes, after every EXT2_MMP_INODE_INTERVAL
+ * inodes in pass1 and pass1b).  There is no guarantee that e2fsck is updating
+ * the MMP block in a timely manner, and the updates it does are purely for
+ * the convenience of the sysadmin and not for automatic validation.
+ */
+#define EXT2_MMP_INODE_INTERVAL 20000
 
 struct struct_ext2_filsys {
 	errcode_t			magic;
@@ -244,6 +257,19 @@ struct struct_ext2_filsys {
 	 */
 	struct ext2_inode_cache		*icache;
 	io_channel			image_io;
+
+	/*
+	 * Buffers for Multiple mount protection(MMP) block.
+	 */
+	void *mmp_buf;
+	void *mmp_unaligned_buf;
+	void *mmp_cmp;
+	int mmp_fd;
+
+	/*
+	 * Time at which e2fsck last updated the MMP block.
+	 */
+	long mmp_last_written;
 
 	/*
 	 * More callback functions
@@ -506,6 +532,12 @@ typedef struct ext2_icount *ext2_icount_t;
 #define EXT2_CHECK_MAGIC(struct, code) \
 	  if ((struct)->magic != (code)) return (code)
 
+/*
+ * Flags for returning status of ext2fs_expand_extra_isize()
+ */
+#define EXT2_EXPAND_EISIZE_UNSAFE	0x0001
+#define EXT2_EXPAND_EISIZE_NEW_BLOCK	0x0002
+#define EXT2_EXPAND_EISIZE_NOSPC	0x0004
 
 /*
  * For ext2 compression support
@@ -538,6 +570,9 @@ typedef struct ext2_icount *ext2_icount_t;
 					 EXT3_FEATURE_INCOMPAT_RECOVER|\
 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+					 EXT4_FEATURE_INCOMPAT_MMP|\
+					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
+					 EXT4_FEATURE_INCOMPAT_DIRDATA|\
 					 EXT4_FEATURE_INCOMPAT_64BIT)
 #else
 #define EXT2_LIB_FEATURE_INCOMPAT_SUPP	(EXT2_FEATURE_INCOMPAT_FILETYPE|\
@@ -546,6 +581,9 @@ typedef struct ext2_icount *ext2_icount_t;
 					 EXT3_FEATURE_INCOMPAT_RECOVER|\
 					 EXT3_FEATURE_INCOMPAT_EXTENTS|\
 					 EXT4_FEATURE_INCOMPAT_FLEX_BG|\
+					 EXT4_FEATURE_INCOMPAT_MMP|\
+					 EXT4_FEATURE_INCOMPAT_EA_INODE|\
+					 EXT4_FEATURE_INCOMPAT_DIRDATA|\
 					 EXT4_FEATURE_INCOMPAT_64BIT)
 #endif
 #define EXT2_LIB_FEATURE_RO_COMPAT_SUPP	(EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER|\
@@ -970,8 +1008,22 @@ extern errcode_t ext2fs_dup_handle(ext2_filsys src, ext2_filsys *dest);
 extern errcode_t ext2fs_expand_dir(ext2_filsys fs, ext2_ino_t dir);
 
 /* ext_attr.c */
+extern errcode_t ext2fs_attr_get(ext2_filsys fs, struct ext2_inode *inode,
+				 int name_index, const char *name, char *buffer,
+				 size_t buffer_size, int *easize);
+
 extern __u32 ext2fs_ext_attr_hash_entry(struct ext2_ext_attr_entry *entry,
 					void *data);
+int ext2fs_attr_get_next_attr(struct ext2_ext_attr_entry *entry, int name_index,
+			      char *buffer, int buffer_size, int start);
+errcode_t ext2fs_attr_set(ext2_filsys fs, ext2_ino_t ino,
+			  struct ext2_inode *inode,
+			  int name_index, const char *name, const char *value,
+			  int value_len, int flags);
+extern errcode_t ext2fs_expand_extra_isize(ext2_filsys fs, ext2_ino_t ino,
+					   struct ext2_inode_large *inode,
+					   int new_extra_isize, int *ret,
+					   int *needed_size);
 extern errcode_t ext2fs_read_ext_attr(ext2_filsys fs, blk_t block, void *buf);
 extern errcode_t ext2fs_read_ext_attr2(ext2_filsys fs, blk64_t block,
 				       void *buf);
@@ -1144,6 +1196,7 @@ extern errcode_t ext2fs_initialize(const char *name, int flags,
 
 /* icount.c */
 extern void ext2fs_free_icount(ext2_icount_t icount);
+extern int ext2fs_icount_is_set(ext2_icount_t icount, ext2_ino_t ino);
 extern errcode_t ext2fs_create_icount_tdb(ext2_filsys fs, char *tdb_dir,
 					  int flags, ext2_icount_t *ret);
 extern errcode_t ext2fs_create_icount2(ext2_filsys fs, int flags,
@@ -1246,11 +1299,11 @@ extern errcode_t ext2fs_zero_blocks(ext2_filsys fs, blk_t blk, int num,
 extern errcode_t ext2fs_zero_blocks2(ext2_filsys fs, blk64_t blk, int num,
 				     blk64_t *ret_blk, int *ret_count); 
 extern errcode_t ext2fs_create_journal_superblock(ext2_filsys fs,
-						  __u32 size, int flags,
+						  __u32 blocks, int flags,
 						  char  **ret_jsb);
 extern errcode_t ext2fs_add_journal_device(ext2_filsys fs,
 					   ext2_filsys journal_dev);
-extern errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t size,
+extern errcode_t ext2fs_add_journal_inode(ext2_filsys fs, blk_t blocks,
 					  int flags);
 extern int ext2fs_default_journal_size(__u64 blocks);
 
@@ -1279,6 +1332,16 @@ errcode_t ext2fs_link(ext2_filsys fs, ext2_ino_t dir, const char *name,
 		      ext2_ino_t ino, int flags);
 errcode_t ext2fs_unlink(ext2_filsys fs, ext2_ino_t dir, const char *name,
 			ext2_ino_t ino, int flags);
+
+/* mmp.c */
+errcode_t ext2fs_mmp_read(ext2_filsys fs, blk_t mmp_blk, void *buf);
+errcode_t ext2fs_mmp_write(ext2_filsys fs, blk_t mmp_blk, void *buf);
+errcode_t ext2fs_mmp_clear(ext2_filsys fs);
+errcode_t ext2fs_mmp_init(ext2_filsys fs);
+errcode_t ext2fs_mmp_start(ext2_filsys fs);
+errcode_t ext2fs_mmp_update(ext2_filsys fs);
+errcode_t ext2fs_mmp_stop(ext2_filsys fs);
+unsigned ext2fs_mmp_new_seq();
 
 /* read_bb.c */
 extern errcode_t ext2fs_read_bb_inode(ext2_filsys fs,
@@ -1315,6 +1378,7 @@ extern void ext2fs_swap_inode_full(ext2_filsys fs, struct ext2_inode_large *t,
 				   int bufsize);
 extern void ext2fs_swap_inode(ext2_filsys fs,struct ext2_inode *t,
 			      struct ext2_inode *f, int hostorder);
+extern void ext2fs_swap_mmp(struct mmp_struct *mmp);
 
 /* valid_blk.c */
 extern int ext2fs_inode_has_valid_blocks(struct ext2_inode *inode);
@@ -1396,7 +1460,8 @@ _INLINE_ errcode_t ext2fs_get_memalign(unsigned long size,
 
 	if (align == 0)
 		align = 8;
-	if (retval = posix_memalign((void **) ptr, align, size)) {
+	retval = posix_memalign((void **)ptr, align, size);
+	if (retval != 0) {
 		if (retval == ENOMEM)
 			return EXT2_ET_NO_MEMORY;
 		return retval;
@@ -1576,6 +1641,24 @@ _INLINE_ __u64 ext2fs_div64_ceil(__u64 a, __u64 b)
 	if (!a)
 		return 0;
 	return ((a - 1) / b) + 1;
+}
+
+
+_INLINE_ struct ext2_dx_root_info* get_ext2_dx_root_info(ext2_filsys fs, char *buf)
+{
+	struct ext2_dir_entry_2 * de = (struct ext2_dir_entry_2 *) buf;
+
+	if (!(fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_DIRDATA))
+	return (struct ext2_dx_root_info *)(buf +
+	__EXT2_DIR_REC_LEN(1) +__EXT2_DIR_REC_LEN(2));
+
+	/* get dotdot first */
+	de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
+
+	/* dx root info is after dotdot entry */
+	de = (struct ext2_dir_entry_2 *)((char *)de + EXT2_DIR_REC_LEN(de));
+
+	return (struct ext2_dx_root_info*) de;
 }
 
 #undef _INLINE_

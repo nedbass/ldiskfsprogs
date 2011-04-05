@@ -422,4 +422,49 @@ ec	EXT2_NO_MTAB_FILE,
 ec	EXT2_ET_CANT_USE_LEGACY_BITMAPS,
 	"Filesystem too large to use legacy bitmaps"
 
+ec	EXT2_ET_EA_BAD_MAGIC,
+	"Extended attribute block has bad magic value"
+
+ec	EXT2_ET_EA_BAD_ENTRIES,
+	"Extended attribute block has bad entries"
+
+ec	EXT2_ET_EA_NO_SPACE,
+	"No free space for extended attribute"
+
+ec	EXT2_ET_EA_TOO_BIG,
+	"Extended attribute too big for buffer"
+
+ec	EXT2_ET_EA_NAME_TOO_BIG,
+	"Extended attribute name too big for header"
+
+ec	EXT2_ET_EA_BAD_NAME,
+	"Extended attribute name is bad"
+
+ec	EXT2_ET_EA_NAME_NOT_FOUND,
+	"Extended attribute name not found"
+
+ec	EXT2_ET_EA_NAME_EXISTS,
+	"Extended attribute name already exists"
+
+ec	EXT2_ET_MMP_MAGIC_INVALID,
+	"MMP: invalid magic number"
+
+ec	EXT2_ET_MMP_FAILED,
+	"MMP: device currently active"
+
+ec	EXT2_ET_MMP_FSCK_ON,
+	"MMP: fsck being run"
+
+ec	EXT2_ET_MMP_BAD_BLOCK,
+	"MMP: block number beyond filesystem range"
+
+ec	EXT2_ET_MMP_UNKNOWN_SEQ,
+	"MMP: undergoing an unknown operation"
+
+ec	EXT2_ET_MMP_CHANGE_ABORT,
+	"MMP: filesystem still in use"
+
+ec	EXT2_ET_MMP_OPEN_DIRECT,
+	"MMP: open with O_DIRECT failed"
+
 	end

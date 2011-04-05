@@ -20,12 +20,15 @@
  * 	- A bitmap of which inodes are in use.		(inode_used_map)
  * 	- A bitmap of which inodes are directories.	(inode_dir_map)
  * 	- A bitmap of which inodes are regular files.	(inode_reg_map)
- * 	- A bitmap of which inodes have bad fields.	(inode_bad_map)
+ * 	- An icount mechanism is used to keep track of
+ *	  inodes with bad fields and its badness	(ctx->inode_badness)
  * 	- A bitmap of which inodes are in bad blocks.	(inode_bb_map)
  * 	- A bitmap of which inodes are imagic inodes.	(inode_imagic_map)
+ *	- A bitmap of which inodes need to be expanded  (expand_eisize_map)
  * 	- A bitmap of which blocks are in use.		(block_found_map)
  * 	- A bitmap of which blocks are in use by two inodes	(block_dup_map)
  * 	- The data blocks of the directory inodes.	(dir_map)
+ *	- A bitmap of EA inodes.			(inode_ea_map)
  *
  * Pass 1 is designed to stash away enough information so that the
  * other passes should not need to read in the inode information
@@ -46,6 +49,7 @@
 
 #include "e2fsck.h"
 #include <ext2fs/ext2_ext_attr.h>
+#include "ext2fs/lfsck.h"
 
 #include "problem.h"
 
@@ -66,7 +70,6 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 static void mark_table_blocks(e2fsck_t ctx);
 static void alloc_bb_map(e2fsck_t ctx);
 static void alloc_imagic_map(e2fsck_t ctx);
-static void mark_inode_bad(e2fsck_t ctx, ino_t ino);
 static void handle_fs_bad_blocks(e2fsck_t ctx);
 static void process_inodes(e2fsck_t ctx, char *block_buf);
 static EXT2_QSORT_TYPE process_inode_cmp(const void *a, const void *b);
@@ -138,7 +141,7 @@ int e2fsck_pass1_check_device_inode(ext2_filsys fs EXT2FS_ATTR((unused)),
 	 * If the index flag is set, then this is a bogus
 	 * device/fifo/socket
 	 */
-	if (inode->i_flags & EXT2_INDEX_FL)
+	if (inode->i_flags & (EXT2_INDEX_FL | EXT4_EXTENTS_FL))
 		return 0;
 
 	/*
@@ -175,7 +178,7 @@ int e2fsck_pass1_check_symlink(ext2_filsys fs, ext2_ino_t ino,
 	struct ext2fs_extent	extent;
 
 	if ((inode->i_size_high || inode->i_size == 0) ||
-	    (inode->i_flags & EXT2_INDEX_FL))
+	    (inode->i_flags & (EXT2_INDEX_FL | EXT4_EXTENTS_FL)))
 		return 0;
 
 	if (inode->i_flags & EXT4_EXTENTS_FL) {
@@ -241,6 +244,7 @@ static void check_immutable(e2fsck_t ctx, struct problem_context *pctx)
 	if (!(pctx->inode->i_flags & BAD_SPECIAL_FLAGS))
 		return;
 
+	e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_NORMAL);
 	if (!fix_problem(ctx, PR_1_SET_IMMUTABLE, pctx))
 		return;
 
@@ -259,12 +263,125 @@ static void check_size(e2fsck_t ctx, struct problem_context *pctx)
 	if ((inode->i_size == 0) && (inode->i_size_high == 0))
 		return;
 
+	e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_NORMAL);
 	if (!fix_problem(ctx, PR_1_SET_NONZSIZE, pctx))
 		return;
 
 	inode->i_size = 0;
 	inode->i_size_high = 0;
 	e2fsck_write_inode(ctx, pctx->ino, pctx->inode, "pass1");
+}
+
+static void e2fsck_block_alloc_stats(ext2_filsys fs, blk64_t blk, int inuse)
+{
+	e2fsck_t ctx = (e2fsck_t) fs->priv_data;
+
+	if (ctx->block_found_map) {
+		if (inuse > 0)
+			ext2fs_mark_block_bitmap2(ctx->block_found_map, blk);
+		else
+			ext2fs_unmark_block_bitmap2(ctx->block_found_map, blk);
+	}
+}
+
+static void mark_inode_ea_map(e2fsck_t ctx, struct problem_context *pctx,
+			      ext2_ino_t ino)
+{
+	if (!ctx->inode_ea_map) {
+		pctx->errcode = ext2fs_allocate_inode_bitmap(ctx->fs,
+					 _("EA inode map"),
+					 &ctx->inode_ea_map);
+		if (pctx->errcode) {
+			fix_problem(ctx, PR_1_ALLOCATE_IBITMAP_ERROR,
+				    pctx);
+			exit(1);
+		}
+	}
+
+	ext2fs_mark_inode_bitmap2(ctx->inode_ea_map, ino);
+}
+
+/*
+ * Delete an EA entry. If this is the last entry to be deleted, then i_file_acl
+ * must have been freed, so we must update e2fsck block statistics and set
+ * i_file_acl_deleted.
+ * When we delete the entry successfully, this function returns 0, else
+ * non-zero value.
+ */
+
+static int e2fsck_ea_entry_delete(e2fsck_t ctx, struct ext2_ext_attr_entry *entry,
+				  struct problem_context *pctx,
+				  int *i_file_acl_deleted, problem_t prob)
+{
+	blk_t i_file_acl = pctx->inode->i_file_acl;
+	int err = 1;
+
+	pctx->num = entry->e_value_inum;
+
+	if (fix_problem(ctx, prob, pctx)) {
+		/* Delete corrupt EA entry */
+		err = ext2fs_attr_set(ctx->fs, pctx->ino, pctx->inode,
+				      entry->e_name_index, entry->e_name,
+				      0, 0, 0);
+		if (err == 0) {
+			if (i_file_acl && pctx->inode->i_file_acl == 0) {
+				e2fsck_block_alloc_stats(ctx->fs, i_file_acl, -1);
+				*i_file_acl_deleted = 1;
+			}
+			return 0;
+		}
+	}
+
+	return err;
+}
+
+/*
+ * Check validity of EA inode. Return 0 if EA inode is valid, nonzero otherwise.
+ */
+static int check_large_ea_inode(e2fsck_t ctx, struct ext2_ext_attr_entry *entry,
+				struct problem_context *pctx,
+				int *i_file_acl_deleted)
+{
+	struct ext2_inode inode;
+	int ret = 0;
+
+	/* Check if inode is within valid range */
+	if ((entry->e_value_inum < EXT2_FIRST_INODE(ctx->fs->super)) ||
+	    (entry->e_value_inum > ctx->fs->super->s_inodes_count)) {
+		ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
+					     i_file_acl_deleted,
+					     PR_1_ATTR_VALUE_EA_INODE);
+		/* If user refuses to delete this entry, caller may try to set
+		 * the bit for this out-of-bound inode in inode_ea_map, so
+		 * always return failure */
+		return 1;
+	}
+
+	e2fsck_read_inode(ctx, entry->e_value_inum, &inode, "pass1");
+	if (!(inode.i_flags & EXT4_EA_INODE_FL)) {
+		/* If EXT4_EA_INODE_FL flag is not present but back-pointer
+		 * matches then we should set this flag */
+		if (inode.i_mtime == pctx->ino &&
+		    inode.i_generation == pctx->inode->i_generation &&
+		    fix_problem(ctx, PR_1_ATTR_SET_EA_INODE_FL, pctx)) {
+			inode.i_flags |= EXT4_EA_INODE_FL;
+			ext2fs_write_inode(ctx->fs, entry->e_value_inum, &inode);
+		} else {
+			ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
+						     i_file_acl_deleted,
+						     PR_1_ATTR_NO_EA_INODE_FL);
+			goto out;
+		}
+	} else if (inode.i_mtime != pctx->ino ||
+		   inode.i_generation != pctx->inode->i_generation) {
+		ret = e2fsck_ea_entry_delete(ctx, entry, pctx,
+					     i_file_acl_deleted,
+					     PR_1_ATTR_INVAL_EA_INODE);
+		goto out;
+	}
+
+out:
+	return ret;
 }
 
 static void check_ea_in_inode(e2fsck_t ctx, struct problem_context *pctx)
@@ -274,15 +391,16 @@ static void check_ea_in_inode(e2fsck_t ctx, struct problem_context *pctx)
 	struct ext2_ext_attr_entry *entry;
 	char *start, *end;
 	unsigned int storage_size, remain;
+	struct lov_user_md_v1 *lmm = NULL;
+	struct lustre_mdt_attrs *lma = NULL;
 	int problem = 0;
 
 	inode = (struct ext2_inode_large *) pctx->inode;
-	storage_size = EXT2_INODE_SIZE(ctx->fs->super) - EXT2_GOOD_OLD_INODE_SIZE -
-		inode->i_extra_isize;
-	start = ((char *) inode) + EXT2_GOOD_OLD_INODE_SIZE +
-		inode->i_extra_isize + sizeof(__u32);
+	storage_size = EXT2_INODE_SIZE(ctx->fs->super) -
+		EXT2_GOOD_OLD_INODE_SIZE - inode->i_extra_isize;
+	entry = &IHDR(inode)->h_first_entry[0];
+	start = (char *)entry;
 	end = (char *) inode + EXT2_INODE_SIZE(ctx->fs->super);
-	entry = (struct ext2_ext_attr_entry *) start;
 
 	/* scan all entry's headers first */
 
@@ -305,17 +423,31 @@ static void check_ea_in_inode(e2fsck_t ctx, struct problem_context *pctx)
 		/* attribute len eats this space */
 		remain -= EXT2_EXT_ATTR_SIZE(entry->e_name_len);
 
-		/* check value size */
-		if (entry->e_value_size == 0 || entry->e_value_size > remain) {
+		if (entry->e_value_size == 0) {
 			pctx->num = entry->e_value_size;
 			problem = PR_1_ATTR_VALUE_SIZE;
 			goto fix;
 		}
 
-		/* e_value_block must be 0 in inode's ea */
-		if (entry->e_value_block != 0) {
-			pctx->num = entry->e_value_block;
-			problem = PR_1_ATTR_VALUE_BLOCK;
+		if (entry->e_value_inum == 0) {
+			/* check value size */
+			if (entry->e_value_size > remain) {
+				pctx->num = entry->e_value_size;
+				problem = PR_1_ATTR_VALUE_SIZE;
+				goto fix;
+			}
+		} else {
+			int ret, tmp;
+
+			ret = check_large_ea_inode(ctx, entry, pctx, &tmp);
+			if (ret == 0)
+				mark_inode_ea_map(ctx, pctx, entry->e_value_inum);
+		}
+
+		/* Value size cannot be larger than EA space in inode */
+		if (entry->e_value_offs > storage_size ||
+		    entry->e_value_offs + entry->e_value_size > storage_size) {
+			problem = PR_1_INODE_EA_BAD_VALUE;
 			goto fix;
 		}
 
@@ -329,10 +461,20 @@ static void check_ea_in_inode(e2fsck_t ctx, struct problem_context *pctx)
 			goto fix;
 		}
 
-		remain -= entry->e_value_size;
+		e2fsck_lfsck_find_ea(ctx, inode, entry,
+				     start + entry->e_value_offs, &lmm, &lma);
+
+		/* If EA value is stored in external inode then it does not
+		 * consume space here */
+		if (entry->e_value_inum == 0)
+			remain -= entry->e_value_size;
 
 		entry = EXT2_EXT_ATTR_NEXT(entry);
 	}
+
+	if (lmm)
+		e2fsck_lfsck_save_ea(ctx, pctx->ino, inode->i_generation,
+				     lmm, lma);
 fix:
 	/*
 	 * it seems like a corruption. it's very unlikely we could repair
@@ -352,7 +494,7 @@ static void check_inode_extra_space(e2fsck_t ctx, struct problem_context *pctx)
 	struct ext2_super_block *sb = ctx->fs->super;
 	struct ext2_inode_large *inode;
 	__u32 *eamagic;
-	int min, max;
+	int min, max, dirty = 0;
 
 	inode = (struct ext2_inode_large *) pctx->inode;
 	if (EXT2_INODE_SIZE(sb) == EXT2_GOOD_OLD_INODE_SIZE) {
@@ -373,20 +515,45 @@ static void check_inode_extra_space(e2fsck_t ctx, struct problem_context *pctx)
 	 */
 	if (inode->i_extra_isize &&
 	    (inode->i_extra_isize < min || inode->i_extra_isize > max)) {
+		e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_NORMAL);
 		if (!fix_problem(ctx, PR_1_EXTRA_ISIZE, pctx))
 			return;
-		inode->i_extra_isize = min;
-		e2fsck_write_inode_full(ctx, pctx->ino, pctx->inode,
-					EXT2_INODE_SIZE(sb), "pass1");
-		return;
+		inode->i_extra_isize = ctx->want_extra_isize;
+		dirty = 1;
+
+		goto out;
 	}
 
-	eamagic = (__u32 *) (((char *) inode) + EXT2_GOOD_OLD_INODE_SIZE +
-			inode->i_extra_isize);
-	if (*eamagic == EXT2_EXT_ATTR_MAGIC) {
-		/* it seems inode has an extended attribute(s) in body */
-		check_ea_in_inode(ctx, pctx);
+	if (EXT4_FITS_IN_INODE(inode, inode,i_crtime) && inode->i_crtime != 0 &&
+	    (EXT4_XTIME_FUTURE(ctx, sb, inode->i_crtime, 2 * ctx->time_fudge) ||
+	     EXT4_XTIME_ANCIENT(ctx, sb, inode->i_crtime, 2*ctx->time_fudge))) {
+		pctx->num = inode->i_crtime;
+		if (fix_problem(ctx, PR_1_CRTIME_BAD, pctx)) {
+			inode->i_crtime = 0;
+			dirty = 1;
+		}
+		e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_HIGH);
 	}
+
+	eamagic = &IHDR(inode)->h_magic;
+	if (*eamagic != EXT2_EXT_ATTR_MAGIC &&
+	    (ctx->flags & E2F_FLAG_EXPAND_EISIZE) &&
+	    (inode->i_extra_isize < ctx->want_extra_isize)) {
+		fix_problem(ctx, PR_1_EXPAND_EISIZE, pctx);
+		memset((char *)inode + EXT2_GOOD_OLD_INODE_SIZE, 0,
+			EXT2_INODE_SIZE(sb) - EXT2_GOOD_OLD_INODE_SIZE);
+		inode->i_extra_isize = ctx->want_extra_isize;
+		dirty = 1;
+		if (inode->i_extra_isize < ctx->min_extra_isize)
+			ctx->min_extra_isize = inode->i_extra_isize;
+	}
+
+	if (*eamagic == EXT2_EXT_ATTR_MAGIC)
+		check_ea_in_inode(ctx, pctx);
+out:
+	if (dirty)
+		e2fsck_write_inode_full(ctx, pctx->ino, pctx->inode,
+					EXT2_INODE_SIZE(sb), "pass1");
 }
 
 /*
@@ -404,7 +571,7 @@ static void check_is_really_dir(e2fsck_t ctx, struct problem_context *pctx,
 	struct ext2_dir_entry 	*dirent;
 	const char		*old_op;
 	errcode_t		retval;
-	blk64_t			blk, first_dir_blk;
+	blk64_t			blk;
 	unsigned int		i, rec_len, not_device = 0;
 	int			extent_fs;
 
@@ -436,7 +603,8 @@ static void check_is_really_dir(e2fsck_t ctx, struct problem_context *pctx,
 	 * with it.
 	 */
 
-	extent_fs = (ctx->fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_EXTENTS);
+	extent_fs = (ctx->fs->super->s_feature_incompat &
+		     EXT3_FEATURE_INCOMPAT_EXTENTS);
 	if (extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) {
 		/* extent mapped */
 		if  (ext2fs_bmap2(ctx->fs, pctx->ino, inode, 0, 0, 0, 0,
@@ -500,6 +668,7 @@ static void check_is_really_dir(e2fsck_t ctx, struct problem_context *pctx,
 	    (rec_len % 4))
 		return;
 
+	e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_NORMAL);
 	if (fix_problem(ctx, PR_1_TREAT_AS_DIRECTORY, pctx)) {
 		inode->i_mode = (inode->i_mode & 07777) | LINUX_S_IFDIR;
 		e2fsck_write_inode_full(ctx, pctx->ino, inode,
@@ -539,6 +708,150 @@ extern void e2fsck_setup_tdb_icount(e2fsck_t ctx, int flags,
 		*ret = 0;
 }
 
+int e2fsck_pass1_delete_attr(e2fsck_t ctx, struct ext2_inode_large *inode,
+			     struct problem_context *pctx, int needed_size)
+{
+	struct ext2_ext_attr_header *header;
+	struct ext2_ext_attr_entry *entry_ino, *entry_blk = NULL, *entry;
+	char *start, name[4096], block_buf[4096];
+	int len, index = EXT2_ATTR_INDEX_USER, entry_size, ea_size;
+	int in_inode = 1, error;
+	unsigned int freed_bytes = inode->i_extra_isize;
+
+	entry_ino = &IHDR(inode)->h_first_entry[0];
+	start = (char *)entry_ino;
+
+	if (inode->i_file_acl) {
+		error = ext2fs_read_ext_attr(ctx->fs, inode->i_file_acl,
+					     block_buf);
+		/* We have already checked this block, shouldn't happen */
+		if (error) {
+			fix_problem(ctx, PR_1_EXTATTR_READ_ABORT, pctx);
+			return 0;
+		}
+		header = BHDR(block_buf);
+		if (header->h_magic != EXT2_EXT_ATTR_MAGIC) {
+			fix_problem(ctx, PR_1_EXTATTR_READ_ABORT, pctx);
+			return 0;
+		}
+
+		entry_blk = (struct ext2_ext_attr_entry *)(header+1);
+	}
+	entry = entry_ino;
+	len = sizeof(entry->e_name);
+	entry_size = ext2fs_attr_get_next_attr(entry, index, name, len, 1);
+
+	while (freed_bytes < needed_size) {
+		if (entry_size && name[0] != '\0') {
+			pctx->str = name;
+			if (fix_problem(ctx, PR_1_EISIZE_DELETE_EA, pctx)) {
+				ea_size = EXT2_EXT_ATTR_LEN(entry->e_name_len) +
+					  EXT2_EXT_ATTR_SIZE(entry->e_value_size);
+				error = ext2fs_attr_set(ctx->fs, pctx->ino,
+							(struct ext2_inode *)inode,
+							index, name, 0,0,0);
+				if (!error)
+					freed_bytes += ea_size;
+			}
+		}
+		len = sizeof(entry->e_name);
+		entry_size = ext2fs_attr_get_next_attr(entry, index,name,len,0);
+		entry = EXT2_EXT_ATTR_NEXT(entry);
+		if (EXT2_EXT_IS_LAST_ENTRY(entry)) {
+			if (in_inode) {
+				entry = entry_blk;
+				len = sizeof(entry->e_name);
+				entry_size = ext2fs_attr_get_next_attr(entry,
+							index, name, len, 1);
+				in_inode = 0;
+			} else {
+				index += 1;
+				in_inode = 1;
+				if (!entry && index < EXT2_ATTR_INDEX_MAX)
+					entry = (struct ext2_ext_attr_entry *)start;
+				else
+					return freed_bytes;
+			}
+		}
+	}
+
+	return freed_bytes;
+}
+
+int e2fsck_pass1_expand_eisize(e2fsck_t ctx, struct ext2_inode_large *inode,
+			       struct problem_context *pctx)
+{
+	int needed_size = 0, retval, ret = EXT2_EXPAND_EISIZE_UNSAFE;
+	static int message;
+
+retry:
+	retval = ext2fs_expand_extra_isize(ctx->fs, pctx->ino, inode,
+					   ctx->want_extra_isize, &ret,
+					   &needed_size);
+	if (ret & EXT2_EXPAND_EISIZE_NEW_BLOCK)
+		goto mark_expand_eisize_map;
+	if (!retval) {
+		e2fsck_write_inode_full(ctx, pctx->ino,
+					(struct ext2_inode *)inode,
+					EXT2_INODE_SIZE(ctx->fs->super),
+					"pass1");
+		return 0;
+	}
+
+	if (ret & EXT2_EXPAND_EISIZE_NOSPC) {
+		if (ctx->options & (E2F_OPT_PREEN | E2F_OPT_YES)) {
+			fix_problem(ctx, PR_1_EA_BLK_NOSPC, pctx);
+			ctx->flags |= E2F_FLAG_ABORT;
+			return -1;
+		}
+
+		if (!message) {
+			pctx->num = ctx->fs->super->s_min_extra_isize;
+			fix_problem(ctx, PR_1_EXPAND_EISIZE_WARNING, pctx);
+			message = 1;
+		}
+delete_EA:
+		retval = e2fsck_pass1_delete_attr(ctx, inode, pctx,
+						  needed_size);
+		if (retval >= ctx->want_extra_isize)
+			goto retry;
+
+		needed_size -= retval;
+
+		/*
+		 * We loop here until either the user deletes EA(s) or
+		 * EXTRA_ISIZE feature is disabled.
+		 */
+		if (fix_problem(ctx, PR_1_CLEAR_EXTRA_ISIZE, pctx)) {
+			ctx->fs->super->s_feature_ro_compat &=
+					~EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE;
+			ext2fs_mark_super_dirty(ctx->fs);
+		} else {
+			goto delete_EA;
+		}
+		ctx->fs_unexpanded_inodes++;
+
+		/* No EA was deleted, inode cannot be expanded */
+		return -1;
+	}
+
+mark_expand_eisize_map:
+	if (!ctx->expand_eisize_map) {
+		pctx->errcode = ext2fs_allocate_inode_bitmap(ctx->fs,
+					 _("expand extrz isize map"),
+					 &ctx->expand_eisize_map);
+		if (pctx->errcode) {
+			fix_problem(ctx, PR_1_ALLOCATE_IBITMAP_ERROR,
+				    pctx);
+			exit(1);
+		}
+	}
+
+	/* Add this inode to the expand_eisize_map */
+	ext2fs_mark_inode_bitmap2(ctx->expand_eisize_map, pctx->ino);
+	return 0;
+}
+
 void e2fsck_pass1(e2fsck_t ctx)
 {
 	int	i;
@@ -559,6 +872,8 @@ void e2fsck_pass1(e2fsck_t ctx)
 	int		imagic_fs, extent_fs;
 	int		busted_fs_time = 0;
 	int		inode_size;
+	int		inode_exp = 0;
+
 
 	init_resource_track(&rtrack, ctx->fs->io);
 	clear_problem_context(&pctx);
@@ -694,7 +1009,26 @@ void e2fsck_pass1(e2fsck_t ctx)
 	    (fs->super->s_mtime < fs->super->s_inodes_count))
 		busted_fs_time = 1;
 
+	if ((fs->super->s_feature_incompat & EXT4_FEATURE_INCOMPAT_MMP) &&
+	    !(fs->super->s_mmp_block <= fs->super->s_first_data_block ||
+	      fs->super->s_mmp_block >= fs->super->s_blocks_count))
+		ext2fs_mark_block_bitmap2(ctx->block_found_map,
+					 fs->super->s_mmp_block);
+
+	if (!(ctx->options & E2F_OPT_READONLY) &&
+	    (ctx->lustre_devtype & LUSTRE_TYPE) == LUSTRE_MDS) {
+		if (e2fsck_lfsck_remove_pending(ctx, NULL))
+			return;
+	}
+
 	while (1) {
+		if (ino % EXT2_MMP_INODE_INTERVAL == 0) {
+			errcode_t error;
+
+			error = e2fsck_mmp_update(fs);
+			if (error)
+				fatal_error(ctx, 0);
+		}
 		old_op = ehandler_operation(_("getting next inode from scan"));
 		pctx.errcode = ext2fs_get_next_inode_full(scan, &ino,
 							  inode, inode_size);
@@ -787,14 +1121,16 @@ void e2fsck_pass1(e2fsck_t ctx)
 			ehp = inode->i_block;
 #endif
 			if ((ext2fs_extent_header_verify(ehp,
-					 sizeof(inode->i_block)) == 0) &&
-			    (fix_problem(ctx, PR_1_UNSET_EXTENT_FL, &pctx))) {
-				inode->i_flags |= EXT4_EXTENTS_FL;
+					 sizeof(inode->i_block)) == 0)) {
+				e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+				if (fix_problem(ctx, PR_1_UNSET_EXTENT_FL, &pctx)) {
+					inode->i_flags |= EXT4_EXTENTS_FL;
 #ifdef WORDS_BIGENDIAN
-				memcpy(inode->i_block, tmp_block,
-				       sizeof(inode->i_block));
+					memcpy(inode->i_block, tmp_block,
+					       sizeof(inode->i_block));
 #endif
-				e2fsck_write_inode(ctx, ino, inode, "pass1");
+					e2fsck_write_inode(ctx, ino, inode, "pass1");
+				}
 			}
 		}
 
@@ -854,6 +1190,7 @@ void e2fsck_pass1(e2fsck_t ctx)
 			 * as a special case.
 			 */
 			if (inode->i_dtime && inode->i_links_count) {
+				e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 				if (fix_problem(ctx, PR_1_ROOT_DTIME, &pctx)) {
 					inode->i_dtime = 0;
 					e2fsck_write_inode(ctx, ino, inode,
@@ -961,6 +1298,7 @@ void e2fsck_pass1(e2fsck_t ctx)
 		 *
 		 */
 		if (inode->i_dtime) {
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 			if (fix_problem(ctx, PR_1_SET_DTIME, &pctx)) {
 				inode->i_dtime = 0;
 				e2fsck_write_inode(ctx, ino, inode, "pass1");
@@ -977,18 +1315,19 @@ void e2fsck_pass1(e2fsck_t ctx)
 			frag = fsize = 0;
 		}
 
+		/* Fixed in pass2, e2fsck_process_bad_inode(). */
 		if (inode->i_faddr || frag || fsize ||
 		    (LINUX_S_ISDIR(inode->i_mode) && inode->i_dir_acl))
-			mark_inode_bad(ctx, ino);
-		if (!(fs->super->s_feature_incompat & 
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+		if (!(fs->super->s_feature_incompat &
 		      EXT4_FEATURE_INCOMPAT_64BIT) &&
 		    inode->osd2.linux2.l_i_file_acl_high != 0)
-			mark_inode_bad(ctx, ino);
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if ((fs->super->s_creator_os == EXT2_OS_LINUX) &&
 		    !(fs->super->s_feature_ro_compat &
 		      EXT4_FEATURE_RO_COMPAT_HUGE_FILE) &&
 		    (inode->osd2.linux2.l_i_blocks_hi != 0))
-			mark_inode_bad(ctx, ino);
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if (inode->i_flags & EXT2_IMAGIC_FL) {
 			if (imagic_fs) {
 				if (!ctx->inode_imagic_map)
@@ -996,6 +1335,7 @@ void e2fsck_pass1(e2fsck_t ctx)
 				ext2fs_mark_inode_bitmap2(ctx->inode_imagic_map,
 							 ino);
 			} else {
+				e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 				if (fix_problem(ctx, PR_1_SET_IMAGIC, &pctx)) {
 					inode->i_flags &= ~EXT2_IMAGIC_FL;
 					e2fsck_write_inode(ctx, ino,
@@ -1046,8 +1386,7 @@ void e2fsck_pass1(e2fsck_t ctx)
 				check_blocks(ctx, &pctx, block_buf);
 				continue;
 			}
-		}
-		else if (LINUX_S_ISFIFO (inode->i_mode) &&
+		} else if (LINUX_S_ISFIFO (inode->i_mode) &&
 			 e2fsck_pass1_check_device_inode(fs, inode)) {
 			check_immutable(ctx, &pctx);
 			check_size(ctx, &pctx);
@@ -1057,8 +1396,20 @@ void e2fsck_pass1(e2fsck_t ctx)
 			check_immutable(ctx, &pctx);
 			check_size(ctx, &pctx);
 			ctx->fs_sockets_count++;
-		} else
-			mark_inode_bad(ctx, ino);
+		} else {
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+		}
+
+		if (EXT4_XTIME_FUTURE(ctx, sb, inode->i_atime,ctx->time_fudge)||
+		    EXT4_XTIME_FUTURE(ctx, sb, inode->i_mtime,ctx->time_fudge))
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+
+		if (EXT4_XTIME_FUTURE(ctx, sb, inode->i_ctime,ctx->time_fudge)||
+		    EXT4_XTIME_ANCIENT(ctx, sb, inode->i_ctime,ctx->time_fudge))
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_HIGH);
+
+		/* i_crtime is checked in check_inode_extra_space() */
+
 		if (!(inode->i_flags & EXT4_EXTENTS_FL)) {
 			if (inode->i_block[EXT2_IND_BLOCK])
 				ctx->fs_ind_count++;
@@ -1077,6 +1428,22 @@ void e2fsck_pass1(e2fsck_t ctx)
 			process_inode_count++;
 		} else
 			check_blocks(ctx, &pctx, block_buf);
+
+		if (ctx->flags & E2F_FLAG_EXPAND_EISIZE) {
+			struct ext2_inode_large *inode_l;
+
+			inode_l = (struct ext2_inode_large *)inode;
+
+			if (inode_l->i_extra_isize < ctx->want_extra_isize) {
+				fix_problem(ctx, PR_1_EXPAND_EISIZE, &pctx);
+				inode_exp = e2fsck_pass1_expand_eisize(ctx,
+								       inode_l,
+								       &pctx);
+			}
+			if ((inode_l->i_extra_isize < ctx->min_extra_isize) &&
+			    inode_exp == 0)
+				ctx->min_extra_isize = inode_l->i_extra_isize;
+		}
 
 		if (ctx->flags & E2F_FLAG_SIGNAL_MASK)
 			return;
@@ -1162,6 +1529,9 @@ void e2fsck_pass1(e2fsck_t ctx)
 		}
 		e2fsck_pass1_dupblocks(ctx, block_buf);
 	}
+
+	e2fsck_lfsck_flush_ea(ctx);
+
 	ext2fs_free_mem(&inodes_to_process);
 endit:
 	e2fsck_use_inode_shortcuts(ctx, 0);
@@ -1261,26 +1631,31 @@ static EXT2_QSORT_TYPE process_inode_cmp(const void *a, const void *b)
 }
 
 /*
- * Mark an inode as being bad in some what
+ * Mark an inode as being bad and increment its badness counter.
  */
-static void mark_inode_bad(e2fsck_t ctx, ino_t ino)
+void e2fsck_mark_inode_bad_loc(e2fsck_t ctx, ino_t ino, int count,
+			       const char *func, const int line)
 {
 	struct		problem_context pctx;
+	__u16		result;
 
-	if (!ctx->inode_bad_map) {
+	if (!ctx->inode_badness) {
 		clear_problem_context(&pctx);
 
-		pctx.errcode = ext2fs_allocate_inode_bitmap(ctx->fs,
-			    _("bad inode map"), &ctx->inode_bad_map);
+		pctx.errcode = ext2fs_create_icount2(ctx->fs, 0, 0, NULL,
+						     &ctx->inode_badness);
 		if (pctx.errcode) {
-			pctx.num = 3;
-			fix_problem(ctx, PR_1_ALLOCATE_IBITMAP_ERROR, &pctx);
-			/* Should never get here */
+			fix_problem(ctx, PR_1_ALLOCATE_ICOUNT, &pctx);
 			ctx->flags |= E2F_FLAG_ABORT;
 			return;
 		}
 	}
-	ext2fs_mark_inode_bitmap2(ctx->inode_bad_map, ino);
+	ext2fs_icount_fetch(ctx->inode_badness, ino, &result);
+	ext2fs_icount_store(ctx->inode_badness, ino, count + result);
+
+	if (ctx->options & E2F_OPT_DEBUG)
+		fprintf(stderr, "%s:%d: increase inode %lu badness %u to %u\n",
+			func, line, (unsigned long)ino, result, count + result);
 }
 
 
@@ -1382,11 +1757,17 @@ static void adjust_extattr_refcount(e2fsck_t ctx, ext2_refcount_t refcount,
 			break;
 		pctx.blk = blk;
 		pctx.errcode = ext2fs_read_ext_attr2(fs, blk, block_buf);
+		/* We already checked this block, shouldn't happen */
 		if (pctx.errcode) {
 			fix_problem(ctx, PR_1_EXTATTR_READ_ABORT, &pctx);
 			return;
 		}
-		header = (struct ext2_ext_attr_header *) block_buf;
+		header = BHDR(block_buf);
+		if (header->h_magic != EXT2_EXT_ATTR_MAGIC) {
+			fix_problem(ctx, PR_1_EXTATTR_READ_ABORT, &pctx);
+			return;
+		}
+
 		pctx.blkcount = header->h_refcount;
 		should_be = header->h_refcount + adjust_sign * count;
 		pctx.num = should_be;
@@ -1418,6 +1799,9 @@ static int check_ext_attr(e2fsck_t ctx, struct problem_context *pctx,
 	struct ext2_ext_attr_entry *entry;
 	int		count;
 	region_t	region = 0;
+	struct lov_user_md_v1 *lmm = NULL;
+	struct lustre_mdt_attrs *lma = NULL;
+	int ret;
 
 	blk = ext2fs_file_acl_block(inode);
 	if (blk == 0)
@@ -1433,7 +1817,8 @@ static int check_ext_attr(e2fsck_t ctx, struct problem_context *pctx,
 	if (!(fs->super->s_feature_compat & EXT2_FEATURE_COMPAT_EXT_ATTR) ||
 	    (blk < fs->super->s_first_data_block) ||
 	    (blk >= ext2fs_blocks_count(fs->super))) {
-		mark_inode_bad(ctx, ino);
+		/* Fixed in pass2, e2fsck_process_bad_inode(). */
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		return 0;
 	}
 
@@ -1493,7 +1878,7 @@ static int check_ext_attr(e2fsck_t ctx, struct problem_context *pctx,
 	pctx->errcode = ext2fs_read_ext_attr2(fs, blk, block_buf);
 	if (pctx->errcode && fix_problem(ctx, PR_1_READ_EA_BLOCK, pctx))
 		goto clear_extattr;
-	header = (struct ext2_ext_attr_header *) block_buf;
+	header = BHDR(block_buf);
 	pctx->blk = ext2fs_file_acl_block(inode);
 	if (((ctx->ext_attr_ver == 1) &&
 	     (header->h_magic != EXT2_EXT_ATTR_MAGIC_v1)) ||
@@ -1538,19 +1923,27 @@ static int check_ext_attr(e2fsck_t ctx, struct problem_context *pctx,
 				goto clear_extattr;
 			break;
 		}
-		if (entry->e_value_block != 0) {
-			if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
-				goto clear_extattr;
-		}
-		if (entry->e_value_offs + entry->e_value_size > fs->blocksize) {
-			if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
-				goto clear_extattr;
-			break;
-		}
-		if (entry->e_value_size &&
-		    region_allocate(region, entry->e_value_offs,
-				    EXT2_EXT_ATTR_SIZE(entry->e_value_size))) {
-			if (fix_problem(ctx, PR_1_EA_ALLOC_COLLISION, pctx))
+		if (entry->e_value_inum == 0) {
+			if (entry->e_value_offs + entry->e_value_size > fs->blocksize) {
+				if (fix_problem(ctx, PR_1_EA_BAD_VALUE, pctx))
+					goto clear_extattr;
+				break;
+			}
+			if (entry->e_value_size &&
+			    region_allocate(region, entry->e_value_offs,
+					    EXT2_EXT_ATTR_SIZE(entry->e_value_size))) {
+				if (fix_problem(ctx, PR_1_EA_ALLOC_COLLISION, pctx))
+					goto clear_extattr;
+			}
+		} else {
+			int i_file_acl_deleted = 0;
+
+			ret = check_large_ea_inode(ctx, entry, pctx,
+						   &i_file_acl_deleted);
+			if (ret == 0)
+				mark_inode_ea_map(ctx, pctx, entry->e_value_inum);
+
+			if (i_file_acl_deleted)
 				goto clear_extattr;
 		}
 
@@ -1564,8 +1957,19 @@ static int check_ext_attr(e2fsck_t ctx, struct problem_context *pctx,
 			entry->e_hash = hash;
 		}
 
+		if (e2fsck_lfsck_find_ea(ctx, (struct ext2_inode_large *)inode,
+					 entry, block_buf +entry->e_value_offs,
+					 &lmm, &lma) != 0) {
+			if (ctx->flags & E2F_FLAG_SIGNAL_MASK)
+				return 0;
+		}
+
 		entry = EXT2_EXT_ATTR_NEXT(entry);
 	}
+
+	if (lmm)
+		e2fsck_lfsck_save_ea(ctx, ino, inode->i_generation, lmm, lma);
+
 	if (region_allocate(region, (char *)entry - (char *)header, 4)) {
 		if (fix_problem(ctx, PR_1_EA_ALLOC_COLLISION, pctx))
 			goto clear_extattr;
@@ -1599,9 +2003,11 @@ static int handle_htree(e2fsck_t ctx, struct problem_context *pctx,
 
 	if ((!LINUX_S_ISDIR(inode->i_mode) &&
 	     fix_problem(ctx, PR_1_HTREE_NODIR, pctx)) ||
-	    (!(fs->super->s_feature_compat & EXT2_FEATURE_COMPAT_DIR_INDEX) &&
-	     fix_problem(ctx, PR_1_HTREE_SET, pctx)))
-		return 1;
+	    (!(fs->super->s_feature_compat & EXT2_FEATURE_COMPAT_DIR_INDEX))) {
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+		if (fix_problem(ctx, PR_1_HTREE_SET, pctx))
+			return 1;
+	}
 
 	pctx->errcode = ext2fs_bmap2(fs, ino, inode, 0, 0, 0, 0, &blk);
 
@@ -1609,6 +2015,7 @@ static int handle_htree(e2fsck_t ctx, struct problem_context *pctx,
 	    (blk == 0) ||
 	    (blk < fs->super->s_first_data_block) ||
 	    (blk >= ext2fs_blocks_count(fs->super))) {
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if (fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
 			return 1;
 		else
@@ -1616,11 +2023,14 @@ static int handle_htree(e2fsck_t ctx, struct problem_context *pctx,
 	}
 
 	retval = io_channel_read_blk64(fs->io, blk, 1, block_buf);
-	if (retval && fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
-		return 1;
+	if (retval) {
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
+		if (fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
+			return 1;
+	}
 
 	/* XXX should check that beginning matches a directory */
-	root = (struct ext2_dx_root_info *) (block_buf + 24);
+	root = get_ext2_dx_root_info(fs, block_buf);
 
 	if ((root->reserved_zero || root->info_length < 8) &&
 	    fix_problem(ctx, PR_1_HTREE_BADROOT, pctx))
@@ -1658,8 +2068,8 @@ void e2fsck_clear_inode(e2fsck_t ctx, ext2_ino_t ino,
 	ext2fs_unmark_inode_bitmap2(ctx->inode_used_map, ino);
 	if (ctx->inode_reg_map)
 		ext2fs_unmark_inode_bitmap2(ctx->inode_reg_map, ino);
-	if (ctx->inode_bad_map)
-		ext2fs_unmark_inode_bitmap2(ctx->inode_bad_map, ino);
+	if (ctx->inode_badness)
+		ext2fs_icount_store(ctx->inode_badness, ino, 0); 
 
 	/*
 	 * If the inode was partially accounted for before processing
@@ -1668,6 +2078,34 @@ void e2fsck_clear_inode(e2fsck_t ctx, ext2_ino_t ino,
 	ctx->flags |= restart_flag;
 
 	e2fsck_write_inode(ctx, ino, inode, source);
+}
+
+/* Workaround to handle problems with old Lustre extents patches that didn't
+ * clear the ee_start_hi or ei_leaf_hi fields.  Could be removed as soon as
+ * the f_extent tests are fixed to clear these _hi fields. */
+static errcode_t e2fsck_ext2fs_extent_get(e2fsck_t ctx, struct problem_context *pctx,
+				     ext2_extent_handle_t ehandle, int flags,
+				     struct ext2fs_extent *extent)
+{
+	__u16 blk_hi;
+	int high_bits_ok = ext2fs_blocks_count(ctx->fs->super) > 0xffffffffULL;
+	int rc = 0;
+
+	rc = ext2fs_extent_get(ehandle, flags, extent);
+	if (rc)
+		return rc;
+
+	blk_hi = extent->e_pblk >> 32;
+
+	if (blk_hi && !high_bits_ok &&
+	    fix_problem(ctx, PR_1_EXTENT_HI, pctx)) {
+		extent->e_pblk &= 0xFFFFFFFFULL;
+		rc = ext2fs_extent_replace(ehandle, 0, extent);
+		if (rc)
+			return rc;
+	}
+
+	return rc;
 }
 
 static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
@@ -1687,8 +2125,8 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 	if (pctx->errcode)
 		return;
 
-	pctx->errcode = ext2fs_extent_get(ehandle, EXT2_EXTENT_FIRST_SIB,
-					  &extent);
+	pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx, ehandle,
+						 EXT2_EXTENT_FIRST_SIB, &extent);
 	while (!pctx->errcode && info.num_entries-- > 0) {
 		is_leaf = extent.e_flags & EXT2_EXTENT_FLAGS_LEAF;
 		is_dir = LINUX_S_ISDIR(pctx->inode->i_mode);
@@ -1706,6 +2144,11 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 			problem = PR_1_EXTENT_ENDS_BEYOND;
 
 		if (problem) {
+			/* To ensure that extent is in inode */
+			if (info.curr_level == 0)
+				e2fsck_mark_inode_bad(ctx, pctx->ino,
+						      BADNESS_HIGH);
+
 		report_problem:
 			pctx->blk = extent.e_pblk;
 			pctx->blk2 = extent.e_lblk;
@@ -1718,9 +2161,9 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 					pctx->str = "ext2fs_extent_delete";
 					return;
 				}
-				pctx->errcode = ext2fs_extent_get(ehandle,
-								  EXT2_EXTENT_CURRENT,
-								  &extent);
+				pctx->errcode = e2fsck_ext2fs_extent_get(ctx,
+						pctx, ehandle,
+						EXT2_EXTENT_CURRENT, &extent);
 				if (pctx->errcode == EXT2_ET_NO_CURRENT_NODE) {
 					pctx->errcode = 0;
 					break;
@@ -1732,8 +2175,8 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 
 		if (!is_leaf) {
 			blk = extent.e_pblk;
-			pctx->errcode = ext2fs_extent_get(ehandle,
-						  EXT2_EXTENT_DOWN, &extent);
+			pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx,
+					    ehandle, EXT2_EXTENT_DOWN, &extent);
 			if (pctx->errcode) {
 				pctx->str = "EXT2_EXTENT_DOWN";
 				problem = PR_1_EXTENT_HEADER_INVALID;
@@ -1744,8 +2187,8 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 			scan_extent_node(ctx, pctx, pb, extent.e_lblk, ehandle);
 			if (pctx->errcode)
 				return;
-			pctx->errcode = ext2fs_extent_get(ehandle,
-						  EXT2_EXTENT_UP, &extent);
+			pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx,
+					      ehandle, EXT2_EXTENT_UP, &extent);
 			if (pctx->errcode) {
 				pctx->str = "EXT2_EXTENT_UP";
 				return;
@@ -1810,9 +2253,9 @@ static void scan_extent_node(e2fsck_t ctx, struct problem_context *pctx,
 		pb->previous_block = extent.e_pblk + extent.e_len - 1;
 		start_block = pb->last_block = extent.e_lblk + extent.e_len - 1;
 	next:
-		pctx->errcode = ext2fs_extent_get(ehandle,
-						  EXT2_EXTENT_NEXT_SIB,
-						  &extent);
+		pctx->errcode = e2fsck_ext2fs_extent_get(ctx, pctx, ehandle,
+							 EXT2_EXTENT_NEXT_SIB,
+							 &extent);
 	}
 	if (pctx->errcode == EXT2_ET_EXTENT_NO_NEXT)
 		pctx->errcode = 0;
@@ -1898,6 +2341,7 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 		    EXT2_FEATURE_INCOMPAT_COMPRESSION)
 			pb.compressed = 1;
 		else {
+			e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 			if (fix_problem(ctx, PR_1_COMPR_SET, pctx)) {
 				inode->i_flags &= ~EXT2_COMPRBLK_FL;
 				dirty_inode++;
@@ -1952,6 +2396,11 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 	}
 
 	if (!pb.num_blocks && pb.is_dir) {
+		/*
+		 * The mode might be in-correct. Increasing the badness by
+		 * small amount won't hurt much.
+		 */
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if (fix_problem(ctx, PR_1_ZERO_LENGTH_DIR, pctx)) {
 			e2fsck_clear_inode(ctx, ino, inode, 0, "check_blocks");
 			ctx->fs_directory_count--;
@@ -1986,8 +2435,8 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 		if ((pb.last_block >= 0) &&
 		    /* allow allocated blocks to end of PAGE_SIZE */
 		    (size < (__u64)pb.last_block * fs->blocksize) &&
-		    (pb.last_block / blkpg * blkpg != pb.last_block ||
-		     size < (__u64)(pb.last_block & ~(blkpg-1)) *fs->blocksize) &&
+		    ((pb.last_block + 1) / blkpg * blkpg != (pb.last_block+1) ||
+		     size < (__u64)(pb.last_block & ~(blkpg-1))*fs->blocksize)&&
 		    !(inode->i_flags & EXT4_EOFBLOCKS_FL))
 			bad_size = 3;
 		else if (!(extent_fs && (inode->i_flags & EXT4_EXTENTS_FL)) &&
@@ -2017,6 +2466,7 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 	if (bad_size && !LINUX_S_ISLNK(inode->i_mode)) {
 		pctx->num = (pb.last_block+1) * fs->blocksize;
 		pctx->group = bad_size;
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if (fix_problem(ctx, PR_1_BAD_I_SIZE, pctx)) {
 			inode->i_size = pctx->num;
 			if (!LINUX_S_ISDIR(inode->i_mode))
@@ -2025,8 +2475,7 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 		}
 		pctx->num = 0;
 	}
-	if (LINUX_S_ISREG(inode->i_mode) &&
-	    (inode->i_size_high || inode->i_size & 0x80000000UL))
+	if (LINUX_S_ISREG(inode->i_mode) && EXT2_I_SIZE(inode) >= 0x80000000UL)
 		ctx->large_files++;
 	if ((pb.num_blocks != ext2fs_inode_i_blocks(fs, inode)) ||
 	    ((fs->super->s_feature_ro_compat &
@@ -2034,6 +2483,7 @@ static void check_blocks(e2fsck_t ctx, struct problem_context *pctx,
 	     (inode->i_flags & EXT4_HUGE_FILE_FL) &&
 	     (inode->osd2.linux2.l_i_blocks_hi != 0))) {
 		pctx->num = pb.num_blocks;
+		e2fsck_mark_inode_bad(ctx, ino, BADNESS_NORMAL);
 		if (fix_problem(ctx, PR_1_BAD_I_BLOCKS, pctx)) {
 			inode->i_blocks = pb.num_blocks;
 			inode->osd2.linux2.l_i_blocks_hi = pb.num_blocks >> 32;
@@ -2190,8 +2640,10 @@ static int process_block(ext2_filsys fs,
 		problem = PR_1_TOOBIG_SYMLINK;
 
 	if (blk < fs->super->s_first_data_block ||
-	    blk >= ext2fs_blocks_count(fs->super))
+	    blk >= ext2fs_blocks_count(fs->super)) {
 		problem = PR_1_ILLEGAL_BLOCK_NUM;
+		e2fsck_mark_inode_bad(ctx, pctx->ino, BADNESS_NORMAL);
+	}
 
 	if (problem) {
 		p->num_illegal_blocks++;
@@ -2708,18 +3160,6 @@ static errcode_t e2fsck_get_alloc_block(ext2_filsys fs, blk64_t goal,
 
 	*ret = new_block;
 	return (0);
-}
-
-static void e2fsck_block_alloc_stats(ext2_filsys fs, blk64_t blk, int inuse)
-{
-	e2fsck_t ctx = (e2fsck_t) fs->priv_data;
-
-	if (ctx->block_found_map) {
-		if (inuse > 0)
-			ext2fs_mark_block_bitmap2(ctx->block_found_map, blk);
-		else
-			ext2fs_unmark_block_bitmap2(ctx->block_found_map, blk);
-	}
 }
 
 void e2fsck_use_inode_shortcuts(e2fsck_t ctx, int bool)

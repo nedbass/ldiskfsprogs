@@ -42,7 +42,10 @@ extern void (*set_com_err_hook (void (*) (const char *, long,
 	(const char *, long, const char *, va_list);
 extern void (*reset_com_err_hook (void)) (const char *, long,
 					  const char *, va_list);
+#if 0
 extern int init_error_table(const char * const *msgs, long base, int count);
+#endif
+#define init_error_table(...) PLEASE_DO_NOT_USE_init_error_table_FUNCTION
 
 extern errcode_t add_error_table(const struct error_table * et);
 extern errcode_t remove_error_table(const struct error_table * et);

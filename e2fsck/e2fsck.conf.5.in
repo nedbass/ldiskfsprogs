@@ -129,6 +129,19 @@ This boolean relation controls whether or not
 will offer to clear
 the test_fs flag if the ext4 filesystem is available on the system.  It
 defaults to true.
+.TP
+.I clone
+This string relation controls the default handling of shared blocks in pass 1D.
+It can be set to dup or zero.  See the
+.I "-E clone" 
+option description in e2fsck(8).
+.TP
+.I shared
+This string relation controls the default disposition of files discovered to 
+have shared blocks in pass 1D.  It can be set to preserve, lost+found, 
+or delete.  See the
+.I "-E shared" 
+option description in e2fsck(8).
 .TP 
 .I defer_check_on_battery
 This boolean relation controls whether or not the interval between 

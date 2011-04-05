@@ -16,6 +16,7 @@
  * express or implied warranty.
  */
 
+#if 0
 #include <stdio.h>
 #include <errno.h>
 #ifdef HAVE_STDLIB_H
@@ -50,3 +51,5 @@ int init_error_table(const char * const *msgs, long base, int count)
     _et_dynamic_list = &new_et->etl;
     return 0;
 }
+#endif
+

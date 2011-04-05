@@ -39,6 +39,7 @@ struct problem_context {
 #define PR_LATCH_TOOBIG	0x0080	/* Latch for file to big errors */
 #define PR_LATCH_OPTIMIZE_DIR 0x0090 /* Latch for optimize directories */
 #define PR_LATCH_BG_CHECKSUM 0x00A0  /* Latch for block group checksums */
+#define PR_LATCH_EXTENT_HI 0x00B0 /* Latch for extent high bits set */
 
 #define PR_LATCH(x)	((((x) & PR_LATCH_MASK) >> 4) - 1)
 
@@ -227,6 +228,21 @@ struct problem_context {
 /* Block group checksum (latch question) */
 #define PR_0_GDT_CSUM_LATCH			0x00003E
 
+
+/* Invalid s_min_extra_isize */
+#define PR_0_MIN_EXTRA_ISIZE_INVALID		0x000040
+
+/* Invalid s_want_extra_isize */
+#define PR_0_WANT_EXTRA_ISIZE_INVALID		0x000041
+
+/* Clear EXT4_FEATURE_RO_COMPAT_EXTRA_ISIZE flag */
+#define PR_0_CLEAR_EXTRA_ISIZE			0x000042
+
+/* Superblock has invalid MMP block. */
+#define PR_0_MMP_INVALID_BLK			0x000043
+
+/* Superblock has invalid MMP magic. */
+#define PR_0_MMP_INVALID_MAGIC			0x000044
 
 /*
  * Pass 1 errors
@@ -520,6 +536,53 @@ struct problem_context {
 /* EOFBLOCKS flag set when not necessary */
 #define PR_1_EOFBLOCKS_FL_SET		0x010060
 
+/* Bad extended attribute value in inode */
+#define PR_1_INODE_EA_BAD_VALUE		0x010061
+
+/* extent/index has high 16 bits set - header */
+#define PR_1_EXTENT_HI			0x010062
+
+/* extent/index has high 16 bits set */
+#define PR_1_EXTENT_HI_LATCH		0x010063
+
+/* eh_depth for in-inode header is bad */
+#define PR_1_EXTENT_EH_DEPTH_BAD	0x010064
+
+/* invalid inode creation time */
+#define PR_1_CRTIME_BAD	0x010067
+
+/* Warning for user that all inodes need to be expanded atleast by
+ * s_min_extra_isize
+ */
+#define PR_1_EXPAND_EISIZE_WARNING	0x010068
+
+/* Expand the inode */
+#define PR_1_EXPAND_EISIZE		0x010069
+
+/* Delete an EA so that EXTRA_ISIZE may be enabled */
+#define PR_1_EISIZE_DELETE_EA		0x01006A
+
+/* An EA needs to be deleted by e2fsck is being run with -p or -y */
+#define PR_1_EA_BLK_NOSPC		0x01006B
+
+/* Disable EXTRA_ISIZE feature as inode cannot be expanded
+ * without deletion of an EA
+ */
+#define PR_1_CLEAR_EXTRA_ISIZE		0x01006C
+
+/* Inode has illegal EA value inode */
+#define PR_1_ATTR_VALUE_EA_INODE	0x01006D
+
+/* Invalid backpointer from EA inode to parent inode */
+#define PR_1_ATTR_INVAL_EA_INODE	0x01006E
+
+/* Parent inode has invalid EA entry. EA inode does not have
+ * EXT4_EA_INODE_FL flag. Delete EA entry? */
+#define PR_1_ATTR_NO_EA_INODE_FL	0x01006F
+
+/* EA inode for parent inode does not have EXT4_EA_INODE_FL flag */
+#define PR_1_ATTR_SET_EA_INODE_FL	0x010070
+
 /*
  * Pass 1b errors
  */
@@ -579,6 +642,13 @@ struct problem_context {
 
 /* Couldn't clone file (error) */
 #define PR_1D_CLONE_ERROR	0x013008
+
+/* File with shared blocks found */
+#define PR_1D_DISCONNECT_QUESTION 0x013009
+
+/* Couldn't unlink file (error) */
+#define PR_1D_DISCONNECT_ERROR	0x01300A
+
 
 /*
  * Pass 2 errors
@@ -785,6 +855,12 @@ struct problem_context {
 /* i_file_acl_hi should be zero */
 #define PR_2_I_FILE_ACL_HI_ZERO		0x020048
 
+/* Inode completely corrupt */
+#define PR_2_INODE_TOOBAD		0x020049
+
+/* Directory dirdata flag set */
+#define PR_2_CLEAR_DIRDATA		0x02f000
+
 /*
  * Pass 3 errors
  */
@@ -982,6 +1058,9 @@ struct problem_context {
 
 /* Inode in use but group is marked INODE_UNINIT */
 #define PR_5_INODE_UNINIT		0x050019
+
+/* Expand the inodes which need a new EA block */
+#define PR_5_EXPAND_EISIZE		0x05001a
 
 /*
  * Post-Pass 5 errors

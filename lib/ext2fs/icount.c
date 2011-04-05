@@ -467,6 +467,23 @@ static errcode_t get_inode_count(ext2_icount_t icount, ext2_ino_t ino,
 	return 0;
 }
 
+int ext2fs_icount_is_set(ext2_icount_t icount, ext2_ino_t ino)
+{
+	__u16 result;
+
+	if (ext2fs_test_inode_bitmap2(icount->single, ino))
+		return 1;
+	else if (icount->multiple) {
+		if (ext2fs_test_inode_bitmap2(icount->multiple, ino))
+			return 1;
+		return 0;
+	}
+	ext2fs_icount_fetch(icount, ino, &result);
+	if (result)
+		return 1;
+	return 0;
+}
+
 errcode_t ext2fs_icount_validate(ext2_icount_t icount, FILE *out)
 {
 	errcode_t	ret = 0;

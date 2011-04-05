@@ -64,8 +64,9 @@ char *device_name;
 char *new_label, *new_last_mounted, *new_UUID;
 char *io_options;
 static int c_flag, C_flag, e_flag, f_flag, g_flag, i_flag, l_flag, L_flag;
-static int m_flag, M_flag, r_flag, s_flag = -1, u_flag, U_flag, T_flag;
+static int m_flag, M_flag, r_flag, s_flag = -1, u_flag, U_flag, T_flag, p_flag;
 static int I_flag;
+static int clear_mmp;
 static time_t last_check_time;
 static int print_label;
 static int max_mount_count, mount_count, mount_flags;
@@ -75,6 +76,7 @@ static double reserved_ratio;
 static unsigned long resgid, resuid;
 static unsigned short errors;
 static int open_flag;
+static unsigned int mmp_update_interval;
 static char *features_cmd;
 static char *mntopts_cmd;
 static int stride, stripe_width;
@@ -107,7 +109,7 @@ static void usage(void)
 		  "[-g group]\n"
 		  "\t[-i interval[d|m|w]] [-j] [-J journal_options] [-l]\n"
 		  "\t[-m reserved_blocks_percent] "
-		  "[-o [^]mount_options[,...]] \n"
+		  "[-o [^]mount_options[,...]] [-p mmp_update_interval]\n"
 		  "\t[-r reserved_blocks_count] [-u user] [-C mount_count] "
 		  "[-L volume_label]\n"
 		  "\t[-M last_mounted_dir] [-O [^]feature[,...]]\n"
@@ -123,7 +125,10 @@ static __u32 ok_features[3] = {
 	/* Incompat */
 	EXT2_FEATURE_INCOMPAT_FILETYPE |
 		EXT3_FEATURE_INCOMPAT_EXTENTS |
-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
+		EXT4_FEATURE_INCOMPAT_FLEX_BG |
+		EXT4_FEATURE_INCOMPAT_EA_INODE|
+		EXT4_FEATURE_INCOMPAT_MMP|
+		EXT4_FEATURE_INCOMPAT_DIRDATA,
 	/* R/O compat */
 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
@@ -140,7 +145,10 @@ static __u32 clear_ok_features[3] = {
 		EXT2_FEATURE_COMPAT_DIR_INDEX,
 	/* Incompat */
 	EXT2_FEATURE_INCOMPAT_FILETYPE |
-		EXT4_FEATURE_INCOMPAT_FLEX_BG,
+		EXT4_FEATURE_INCOMPAT_FLEX_BG |
+		EXT4_FEATURE_INCOMPAT_EA_INODE|
+		EXT4_FEATURE_INCOMPAT_MMP|
+		EXT4_FEATURE_INCOMPAT_DIRDATA,
 	/* R/O compat */
 	EXT2_FEATURE_RO_COMPAT_LARGE_FILE |
 		EXT4_FEATURE_RO_COMPAT_HUGE_FILE|
@@ -152,7 +160,7 @@ static __u32 clear_ok_features[3] = {
 /*
  * Remove an external journal from the filesystem
  */
-static void remove_journal_device(ext2_filsys fs)
+static int remove_journal_device(ext2_filsys fs)
 {
 	char		*journal_path;
 	ext2_filsys	jfs;
@@ -241,13 +249,15 @@ static void remove_journal_device(ext2_filsys fs)
 no_valid_journal:
 	if (commit_remove_journal == 0) {
 		fputs(_("Journal NOT removed\n"), stderr);
-		exit(1);
+		return 1;
 	}
 	fs->super->s_journal_dev = 0;
 	uuid_clear(fs->super->s_journal_uuid);
 	ext2fs_mark_super_dirty(fs);
 	fputs(_("Journal removed\n"), stdout);
 	free(journal_path);
+
+	return 0;
 }
 
 /* Helper function for remove_journal_inode */
@@ -272,7 +282,7 @@ static int release_blocks_proc(ext2_filsys fs, blk64_t *blocknr,
 /*
  * Remove the journal inode from the filesystem
  */
-static void remove_journal_inode(ext2_filsys fs)
+static errcode_t remove_journal_inode(ext2_filsys fs)
 {
 	struct ext2_inode	inode;
 	errcode_t		retval;
@@ -282,14 +292,14 @@ static void remove_journal_inode(ext2_filsys fs)
 	if (retval) {
 		com_err(program_name, retval,
 			_("while reading journal inode"));
-		exit(1);
+		return retval;
 	}
 	if (ino == EXT2_JOURNAL_INO) {
 		retval = ext2fs_read_bitmaps(fs);
 		if (retval) {
 			com_err(program_name, retval,
 				_("while reading bitmaps"));
-			exit(1);
+			return retval;
 		}
 		retval = ext2fs_block_iterate3(fs, ino,
 					       BLOCK_FLAG_READ_ONLY, NULL,
@@ -297,7 +307,7 @@ static void remove_journal_inode(ext2_filsys fs)
 		if (retval) {
 			com_err(program_name, retval,
 				_("while clearing journal inode"));
-			exit(1);
+			return retval;
 		}
 		memset(&inode, 0, sizeof(inode));
 		ext2fs_mark_bb_dirty(fs);
@@ -308,25 +318,29 @@ static void remove_journal_inode(ext2_filsys fs)
 	if (retval) {
 		com_err(program_name, retval,
 			_("while writing journal inode"));
-		exit(1);
+		return retval;
 	}
 	fs->super->s_journal_inum = 0;
 	ext2fs_mark_super_dirty(fs);
+
+	return 0;
 }
 
 /*
  * Update the default mount options
  */
-static void update_mntopts(ext2_filsys fs, char *mntopts)
+static int update_mntopts(ext2_filsys fs, char *mntopts)
 {
 	struct ext2_super_block *sb = fs->super;
 
 	if (e2p_edit_mntopts(mntopts, &sb->s_default_mount_opts, ~0)) {
 		fprintf(stderr, _("Invalid mount option set: %s\n"),
 			mntopts);
-		exit(1);
+		return 1;
 	}
 	ext2fs_mark_super_dirty(fs);
+
+	return 0;
 }
 
 static void request_fsck_afterwards(ext2_filsys fs)
@@ -344,11 +358,10 @@ static void request_fsck_afterwards(ext2_filsys fs)
 /*
  * Update the feature set as provided by the user.
  */
-static void update_feature_set(ext2_filsys fs, char *features)
+static int update_feature_set(ext2_filsys fs, char *features)
 {
 	struct ext2_super_block *sb = fs->super;
 	struct ext2_group_desc *gd;
-	errcode_t	retval;
 	__u32		old_features[3];
 	int		i, type_err;
 	unsigned int	mask_err;
@@ -381,7 +394,7 @@ static void update_feature_set(ext2_filsys fs, char *features)
 			fprintf(stderr, _("Setting filesystem feature '%s' "
 					  "not supported.\n"),
 				e2p_feature2string(type_err, mask_err));
-		exit(1);
+		return 1;
 	}
 
 	if (FEATURE_OFF(E2P_FEATURE_COMPAT, EXT3_FEATURE_COMPAT_HAS_JOURNAL)) {
@@ -391,22 +404,92 @@ static void update_feature_set(ext2_filsys fs, char *features)
 				"cleared when the filesystem is\n"
 				"unmounted or mounted "
 				"read-only.\n"), stderr);
-			exit(1);
+			return 1;
 		}
 		if (sb->s_feature_incompat &
 		    EXT3_FEATURE_INCOMPAT_RECOVER) {
 			fputs(_("The needs_recovery flag is set.  "
 				"Please run e2fsck before clearing\n"
 				"the has_journal flag.\n"), stderr);
-			exit(1);
+			return 1;
 		}
 		if (sb->s_journal_inum) {
-			remove_journal_inode(fs);
+			if (remove_journal_inode(fs))
+				return 1;
 		}
 		if (sb->s_journal_dev) {
-			remove_journal_device(fs);
+			if (remove_journal_device(fs))
+				return 1;
 		}
 	}
+	if (FEATURE_ON(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP)) {
+		int error;
+
+		if ((mount_flags & EXT2_MF_MOUNTED) ||
+		    (mount_flags & EXT2_MF_READONLY)) {
+			fputs(_("The multiple mount protection feature can't \n"
+				"be set if the filesystem is mounted or \n"
+				"read-only.\n"), stderr);
+			return 1;
+		}
+
+		error = ext2fs_mmp_init(fs);
+		if (error) {
+			fputs(_("\nError while enabling multiple mount "
+				"protection feature."), stderr);
+			return 1;
+		}
+
+		/*
+		 * We want to update group desc with the new free blocks count
+		 */
+		fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
+
+		printf(_("Multiple mount protection has been enabled "
+			 "with update interval %ds.\n"),
+		       sb->s_mmp_update_interval);
+	}
+
+	if (FEATURE_OFF(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_MMP)) {
+		int error;
+
+		if (mount_flags & EXT2_MF_READONLY) {
+			fputs(_("The multiple mount protection feature cannot\n"
+				"be disabled if the filesystem is readonly.\n"),
+				stderr);
+			return 1;
+		}
+
+		error = ext2fs_read_bitmaps(fs);
+		if (error) {
+			fputs(_("Error while reading bitmaps\n"), stderr);
+			return 1;
+		}
+
+		error = ext2fs_mmp_read(fs, sb->s_mmp_block, NULL);
+		if (error) {
+			struct mmp_struct *mmp_cmp = fs->mmp_cmp;
+
+			if (error == EXT2_ET_MMP_MAGIC_INVALID)
+				printf(_("Magic number in MMP block does not "
+					 "match. expected: %x, actual: %x\n"),
+					 EXT2_MMP_MAGIC, mmp_cmp->mmp_magic);
+			else
+				com_err (program_name, error,
+					 _("while reading MMP block."));
+			goto mmp_error;
+		}
+
+		/* We need to force out the group descriptors as well */
+		fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
+		ext2fs_block_alloc_stats(fs, sb->s_mmp_block, -1);
+mmp_error:
+		sb->s_mmp_block = 0;
+		sb->s_mmp_update_interval = 0;
+	}
+
+	if (FEATURE_ON(E2P_FEATURE_INCOMPAT, EXT4_FEATURE_INCOMPAT_EA_INODE))
+		sb->s_feature_incompat |= EXT4_FEATURE_INCOMPAT_EA_INODE;
 
 	if (FEATURE_ON(E2P_FEATURE_COMPAT, EXT3_FEATURE_COMPAT_HAS_JOURNAL)) {
 		/*
@@ -498,12 +581,14 @@ static void update_feature_set(ext2_filsys fs, char *features)
 	    (old_features[E2P_FEATURE_INCOMPAT] != sb->s_feature_incompat) ||
 	    (old_features[E2P_FEATURE_RO_INCOMPAT] != sb->s_feature_ro_compat))
 		ext2fs_mark_super_dirty(fs);
+
+	return 0;
 }
 
 /*
  * Add a journal to the filesystem.
  */
-static void add_journal(ext2_filsys fs)
+static int add_journal(ext2_filsys fs)
 {
 	unsigned long journal_blocks;
 	errcode_t	retval;
@@ -558,7 +643,7 @@ static void add_journal(ext2_filsys fs)
 			fprintf(stderr, "\n");
 			com_err(program_name, retval,
 				_("\n\twhile trying to create journal file"));
-			exit(1);
+			return retval;
 		} else
 			fputs(_("done\n"), stdout);
 		/*
@@ -569,11 +654,11 @@ static void add_journal(ext2_filsys fs)
 			fs->flags &= ~EXT2_FLAG_SUPER_ONLY;
 	}
 	print_check_message(fs);
-	return;
+	return 0;
 
 err:
 	free(journal_device);
-	exit(1);
+	return 1;
 }
 
 
@@ -641,7 +726,7 @@ static void parse_tune2fs_options(int argc, char **argv)
 	open_flag = 0;
 
 	printf("tune2fs %s (%s)\n", E2FSPROGS_VERSION, E2FSPROGS_DATE);
-	while ((c = getopt(argc, argv, "c:e:fg:i:jlm:o:r:s:u:C:E:I:J:L:M:O:T:U:")) != EOF)
+	while ((c = getopt(argc, argv, "c:e:fg:i:jlm:o:p:r:s:u:C:E:I:J:L:M:O:T:U:")) != EOF)
 		switch (c) {
 		case 'c':
 			max_mount_count = strtol(optarg, &tmp, 0);
@@ -796,6 +881,25 @@ static void parse_tune2fs_options(int argc, char **argv)
 			features_cmd = optarg;
 			open_flag = EXT2_FLAG_RW;
 			break;
+		case 'p':
+			mmp_update_interval = strtol(optarg, &tmp, 0);
+			if (*tmp && mmp_update_interval < 0) {
+				com_err(program_name, 0,
+					_("invalid mmp update interval"));
+				usage();
+			}
+			if (mmp_update_interval == 0)
+				mmp_update_interval = EXT2_MMP_UPDATE_INTERVAL;
+			if (mmp_update_interval > EXT2_MMP_UPDATE_INTERVAL) {
+				com_err(program_name, 0,
+					_("MMP update interval of %s seconds "
+					  "may be dangerous under high load.  "
+					  "Consider decreasing it."),
+					optarg);
+			}
+			p_flag = 1;
+			open_flag = EXT2_FLAG_RW;
+			break;
 		case 'r':
 			reserved_blocks = strtoul(optarg, &tmp, 0);
 			if (*tmp) {
@@ -900,7 +1004,7 @@ void do_findfs(int argc, char **argv)
 }
 #endif
 
-static void parse_extended_opts(ext2_filsys fs, const char *opts)
+static int parse_extended_opts(ext2_filsys fs, const char *opts)
 {
 	char	*buf, *token, *next, *p, *arg;
 	int	len, hash_alg;
@@ -911,7 +1015,7 @@ static void parse_extended_opts(ext2_filsys fs, const char *opts)
 	if (!buf) {
 		fprintf(stderr,
 			_("Couldn't allocate memory to parse options!\n"));
-		exit(1);
+		return 1;
 	}
 	strcpy(buf, opts);
 	for (token = buf; token && *token; token = next) {
@@ -934,6 +1038,9 @@ static void parse_extended_opts(ext2_filsys fs, const char *opts)
 			fs->super->s_flags &= ~EXT2_FLAGS_TEST_FILESYS;
 			printf("Clearing test filesystem flag\n");
 			ext2fs_mark_super_dirty(fs);
+		} else if (strcmp(token, "clear-mmp") == 0 ||
+		           strcmp(token, "clear_mmp") == 0) {
+			clear_mmp = 1;
 		} else if (strcmp(token, "stride") == 0) {
 			if (!arg) {
 				r_usage++;
@@ -1003,15 +1110,18 @@ static void parse_extended_opts(ext2_filsys fs, const char *opts)
 			"and may take an argument which\n"
 			"\tis set off by an equals ('=') sign.\n\n"
 			"Valid extended options are:\n"
+			"\tclear-mmp\n"
 			"\tstride=<RAID per-disk chunk size in blocks>\n"
 			"\tstripe_width=<RAID stride*data disks in blocks>\n"
 			"\thash_alg=<hash algorithm>\n"
 			"\ttest_fs\n"
 			"\t^test_fs\n"));
 		free(buf);
-		exit(1);
+		return 1;
 	}
 	free(buf);
+
+	return 0;
 }
 
 /*
@@ -1097,7 +1207,7 @@ static int move_block(ext2_filsys fs, ext2fs_block_bitmap bmap)
 {
 
 	char *buf;
-	dgrp_t group;
+	dgrp_t group = 0;
 	errcode_t retval;
 	int meta_data = 0;
 	blk64_t blk, new_blk, goal;
@@ -1591,6 +1701,7 @@ int main(int argc, char **argv)
 	ext2_filsys fs;
 	struct ext2_super_block *sb;
 	io_manager io_ptr, io_ptr_orig = NULL;
+	int rc = 0;
 
 #ifdef ENABLE_NLS
 	setlocale(LC_MESSAGES, "");
@@ -1620,14 +1731,26 @@ int main(int argc, char **argv)
 		io_ptr = unix_io_manager;
 
 retry_open:
+	if ((open_flag & EXT2_FLAG_RW) == 0 || f_flag)
+		 open_flag |= EXT2_FLAG_SKIP_MMP;
+
 	retval = ext2fs_open2(device_name, io_options, open_flag,
 			      0, 0, io_ptr, &fs);
 	if (retval) {
-			com_err(program_name, retval,
-				_("while trying to open %s"),
+		com_err(program_name, retval,
+			_("while trying to open %s"),
 			device_name);
-		fprintf(stderr,
-			_("Couldn't find valid filesystem superblock.\n"));
+		if (retval == EXT2_ET_MMP_FSCK_ON)
+			fprintf(stderr,
+				_("If you are sure e2fsck is not running then "
+				  "use 'tune2fs -f -E clear_mmp {device}'\n"));
+		else if (retval == EXT2_ET_MMP_MAGIC_INVALID)
+			fprintf(stderr,
+				_("Magic for mmp is wrong. Try to fix it by "
+				  "using 'fsck {device}'\n"));
+		else if (retval != EXT2_ET_MMP_FAILED)
+			fprintf(stderr,
+			     _("Couldn't find valid filesystem superblock.\n"));
 		exit(1);
 	}
 
@@ -1640,12 +1763,14 @@ retry_open:
 		if (new_inode_size == EXT2_INODE_SIZE(fs->super)) {
 			fprintf(stderr, _("The inode size is already %lu\n"),
 				new_inode_size);
-			exit(1);
+			rc = 1;
+			goto closefs;
 		}
 		if (new_inode_size < EXT2_INODE_SIZE(fs->super)) {
 			fprintf(stderr, _("Shrinking the inode size is "
 					  "not supported\n"));
-			exit(1);
+			rc = 1;
+			goto closefs;
 		}
 
 		/*
@@ -1654,8 +1779,10 @@ retry_open:
 		 */
 		io_ptr_orig = io_ptr;
 		retval = tune2fs_setup_tdb(device_name, &io_ptr);
-		if (retval)
-			exit(1);
+		if (retval) {
+			rc = 1;
+			goto closefs;
+		}
 		if (io_ptr != io_ptr_orig) {
 			ext2fs_close(fs);
 			goto retry_open;
@@ -1670,7 +1797,7 @@ retry_open:
 		printf("%.*s\n", (int) sizeof(sb->s_volume_name),
 		       sb->s_volume_name);
 		remove_error_table(&et_ext2_error_table);
-		exit(0);
+		goto closefs;
 	}
 
 	retval = ext2fs_check_if_mounted(device_name, &mount_flags);
@@ -1678,7 +1805,8 @@ retry_open:
 		com_err("ext2fs_check_if_mount", retval,
 			_("while determining whether %s is mounted."),
 			device_name);
-		exit(1);
+		rc = 1;
+		goto closefs;
 	}
 	/* Normally we only need to write out the superblock */
 	fs->flags |= EXT2_FLAG_SUPER_ONLY;
@@ -1717,12 +1845,19 @@ retry_open:
 		printf (_("Setting reserved blocks percentage to %g%% (%llu blocks)\n"),
 			reserved_ratio, ext2fs_r_blocks_count(sb));
 	}
+	if (p_flag) {
+		sb->s_mmp_update_interval = mmp_update_interval;
+		ext2fs_mark_super_dirty(fs);
+		printf(_("Setting multiple mount protection update interval to "
+			  "%u seconds\n"), mmp_update_interval);
+	}
 	if (r_flag) {
 		if (reserved_blocks >= ext2fs_blocks_count(sb)/2) {
 			com_err(program_name, 0,
 				_("reserved blocks count is too big (%llu)"),
 				reserved_blocks);
-			exit(1);
+			rc = 1;
+			goto closefs;
 		}
 		ext2fs_r_blocks_count_set(sb, reserved_blocks);
 		ext2fs_mark_super_dirty(fs);
@@ -1746,7 +1881,8 @@ retry_open:
 	if (s_flag == 0) {
 		fputs(_("\nClearing the sparse superflag not supported.\n"),
 		      stderr);
-		exit(1);
+		rc = 1;
+		goto closefs;
 	}
 	if (T_flag) {
 		sb->s_lastcheck = last_check_time;
@@ -1774,14 +1910,36 @@ retry_open:
 			sizeof(sb->s_last_mounted));
 		ext2fs_mark_super_dirty(fs);
 	}
-	if (mntopts_cmd)
-		update_mntopts(fs, mntopts_cmd);
-	if (features_cmd)
-		update_feature_set(fs, features_cmd);
-	if (extended_cmd)
-		parse_extended_opts(fs, extended_cmd);
-	if (journal_size || journal_device)
-		add_journal(fs);
+	if (mntopts_cmd) {
+		rc = update_mntopts(fs, mntopts_cmd);
+		if (rc)
+			goto closefs;
+	}
+	if (features_cmd) {
+		rc = update_feature_set(fs, features_cmd);
+		if (rc)
+			goto closefs;
+	}
+	if (extended_cmd) {
+		rc = parse_extended_opts(fs, extended_cmd);
+		if (rc)
+			goto closefs;
+		if (clear_mmp && !f_flag) {
+			fputs(_("Error in using clear_mmp. "
+			        "It must be used with -f\n"),
+			      stderr);
+			goto closefs;
+		}
+	}
+	if (clear_mmp) {
+		rc = ext2fs_mmp_clear(fs);
+		goto closefs;
+	}
+	if (journal_size || journal_device) {
+		rc = add_journal(fs);
+		if (rc);
+			goto closefs;
+	}
 
 	if (U_flag) {
 		int set_csum = 0;
@@ -1809,7 +1967,8 @@ retry_open:
 			uuid_generate(sb->s_uuid);
 		} else if (uuid_parse(new_UUID, sb->s_uuid)) {
 			com_err(program_name, 0, _("Invalid UUID format\n"));
-			exit(1);
+			rc = 1;
+			goto closefs;
 		}
 		if (set_csum) {
 			for (i = 0; i < fs->group_desc_count; i++)
@@ -1823,7 +1982,8 @@ retry_open:
 			fputs(_("The inode size may only be "
 				"changed when the filesystem is "
 				"unmounted.\n"), stderr);
-			exit(1);
+			rc = 1;
+			goto closefs;
 		}
 		if (fs->super->s_feature_incompat &
 		    EXT4_FEATURE_INCOMPAT_FLEX_BG) {
@@ -1856,7 +2016,25 @@ retry_open:
 		ext2fs_mark_super_dirty(fs);
 		printf(_("Setting stripe width to %d\n"), stripe_width);
 	}
+
+	/* Warn if file system needs recovery and it is opened for writing. */
+	if ((open_flag & EXT2_FLAG_RW) && !(mount_flags & EXT2_MF_MOUNTED) &&
+	    (sb->s_feature_compat & EXT3_FEATURE_COMPAT_HAS_JOURNAL) &&
+	    (sb->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER)) {
+		fprintf(stderr,
+			_("Warning: needs_recovery flag is set. You may wish\n"
+			  "replay the journal then rerun this command, or any\n"
+			  "changes may be overwritten by journal recovery.\n"));
+	}
+
 	free(device_name);
 	remove_error_table(&et_ext2_error_table);
+
+closefs:
+	if (rc) {
+		ext2fs_mmp_stop(fs);
+		exit(1);
+	}
+
 	return (ext2fs_close(fs) ? 1 : 0);
 }
