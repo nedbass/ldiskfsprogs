@@ -79,10 +79,12 @@ SMP systems.
 %setup
 
 %build
+%if %{name} == "ldiskfsprogs"
+LDISKFS_OPTS="--with-ldiskfsprogs --disable-elf-shlibs"
+%endif
 %configure --enable-elf-shlibs --enable-nls --enable-maintainer-mode \
-	%{?extra_config_flags:%extra_config_flags} \
-	@LFSCK_CMT@ --enable-lfsck \
-	@LDISKFSPROGS_CMT@ --with-ldiskfsprogs --disable-elf-shlibs
+	%{?extra_config_flags:%extra_config_flags} $LDISKFS_OPTS \
+	@LFSCK_CMT@ --enable-lfsck
 make
 
 %install
